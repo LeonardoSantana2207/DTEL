@@ -1,0 +1,162 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── Status do projeto (mapeado para colunas do Kanban) ─────────────────────
+// TODO → A Fazer
+// IN_PROJECT → Em Projeto
+// PROJECT_DONE → Projeto Concluído
+// IN_LAUNCH → Em Lançamento
+// LAUNCH_DONE → Lançamento Concluído
+// IN_FUSION → Em Fusão
+// FUSION_DONE → Fusão Concluída
+// FINISHED → Finalizado
+
+model Project {
+  id             String   @id @default(cuid())
+  name           String
+  code           String?
+  locality       String?
+  status         String   @default("TODO")
+  kanbanOrder    Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  dueDate        DateTime?
+  notes          String?
+
+  // Trello
+  trelloCardId   String?  @unique
+  trelloCardUrl  String?
+  trelloListId   String?
+  trelloListName String?
+  trelloBoardId  String?
+  trelloLabels   String?  // JSON array
+  trelloDesc     String?
+
+  // KMZ / Drive
+  kmzFilePath    String?
+  kmzFileName    String?
+  kmzFileUrl     String?
+  kmzLastParsed  DateTime?
+  kmzRawAreas    String?  // JSON: { "AAA": 1234.5, "AAB": 567.8 }
+  trelloAreaData String?  // JSON: [{code, team, meters, date, done}]
+  cableMeters    Float?
+  ctoCount       Int?
+  spliceBoxes    Int      @default(1)
+
+  // Relações
+  collaborators  ProjectCollaborator[]
+  checklistItems ChecklistItem[]
+  fusions        Fusion[]
+  activityLogs   ActivityLog[]
+
+  @@map("projects")
+}
+
+model Collaborator {
+  id            String   @id @default(cuid())
+  name          String
+  nickname      String?
+  avatarColor   String   @default("#006734")
+  initials      String?
+  role          String   @default("TECHNICIAN")
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  projectCollabs ProjectCollaborator[]
+  checklistItems ChecklistItem[]
+  fusions        Fusion[]
+
+  @@map("collaborators")
+}
+
+model ProjectCollaborator {
+  id             String   @id @default(cuid())
+  projectId      String
+  collaboratorId String
+  role           String   // LAUNCHER | FUSION | DESIGNER
+  metersAssigned Float?
+  percentage     Float?
+  assignedAt     DateTime @default(now())
+
+  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  collaborator   Collaborator @relation(fields: [collaboratorId], references: [id])
+
+  @@unique([projectId, collaboratorId, role])
+  @@map("project_collaborators")
+}
+
+model ChecklistItem {
+  id             String    @id @default(cuid())
+  projectId      String
+  step           String    // enum como string: PROJECT_RECEIVED, KMZ_LOCATED, etc.
+  stepOrder      Int
+  completed      Boolean   @default(false)
+  completedAt    DateTime?
+  completedById  String?
+  notes          String?
+
+  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  completedBy    Collaborator? @relation(fields: [completedById], references: [id])
+
+  @@unique([projectId, step])
+  @@map("checklist_items")
+}
+
+model Fusion {
+  id             String    @id @default(cuid())
+  projectId      String
+  type           String    @default("CTO") // CTO | SPLICE_BOX
+  ctoName        String?
+  fusedAt        DateTime?
+  responsibleId  String?
+  notes          String?
+  evidenceUrl    String?
+  createdAt      DateTime  @default(now())
+
+  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  responsible    Collaborator? @relation(fields: [responsibleId], references: [id])
+
+  @@map("fusions")
+}
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  projectId   String
+  action      String
+  details     String?  // JSON
+  source      String   @default("MANUAL") // MANUAL | TRELLO | SYSTEM
+  authorName  String?
+  createdAt   DateTime @default(now())
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("activity_logs")
+}
+
+model TrelloSync {
+  id           String   @id @default(cuid())
+  boardId      String
+  syncedAt     DateTime @default(now())
+  status       String   @default("OK")
+  cardsSynced  Int      @default(0)
+  cardsCreated Int      @default(0)
+  cardsUpdated Int      @default(0)
+  errorDetails String?
+
+  @@map("trello_syncs")
+}
+
+model AppConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("app_config")
+}

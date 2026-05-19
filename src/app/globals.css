@@ -1,0 +1,176 @@
+@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── DTEL Design System ─────────────────────────────────────────────────── */
+:root {
+  /* Brand colors */
+  --dtel-green:       #006734;
+  --dtel-green-mid:   #0a7a3e;
+  --dtel-green-light: #1a9e52;
+  --dtel-yellow:      #FFDE00;
+  --dtel-gold:        #FEBF11;
+
+  /* Light mode surfaces */
+  --bg:        #f4f7f5;
+  --surface:   #ffffff;
+  --border:    #d4e8dc;
+  --hover:     #e4f5ec;
+
+  /* Text */
+  --text-primary:   #0d2517;
+  --text-secondary: #3a6347;
+  --text-muted:     #6b8f74;
+
+  /* Status colors */
+  --status-todo:         #94A3B8;
+  --status-project:      #3B82F6;
+  --status-project-done: #06B6D4;
+  --status-launch:       #F59E0B;
+  --status-launch-done:  #F97316;
+  --status-fusion:       #8B5CF6;
+  --status-fusion-done:  #10B981;
+  --status-finished:     #006734;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 6px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 20px rgba(0,0,0,0.09);
+  --shadow-lg: 0 8px 40px rgba(0,0,0,0.13);
+
+  /* Radius */
+  --radius: 10px;
+  --radius-lg: 14px;
+}
+
+/* ─── Base ───────────────────────────────────────────────────────────────── */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  font-family: 'Heebo', 'Inter', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  height: 100%;
+}
+
+/* ─── Scrollbar DTEL ─────────────────────────────────────────────────────── */
+::-webkit-scrollbar        { width: 6px; height: 6px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: #d4e8dc; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #006734; }
+
+/* ─── Kanban scrollbar (horizontal) ─────────────────────────────────────── */
+.kanban-scroll::-webkit-scrollbar { height: 8px; }
+.kanban-scroll::-webkit-scrollbar-track { background: #e4f5ec; border-radius: 4px; }
+.kanban-scroll::-webkit-scrollbar-thumb { background: #006734; border-radius: 4px; }
+
+/* ─── Utility ────────────────────────────────────────────────────────────── */
+@layer utilities {
+  .text-balance { text-wrap: balance; }
+
+  .gradient-dtel {
+    background: linear-gradient(135deg, #006734 0%, #0a7a3e 50%, #1a9e52 100%);
+  }
+
+  .gradient-gold {
+    background: linear-gradient(135deg, #FEBF11 0%, #FFDE00 100%);
+  }
+
+  .card-hover {
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+
+  .progress-bar {
+    background: linear-gradient(90deg, var(--dtel-green), var(--dtel-green-light));
+    border-radius: 4px;
+    height: 100%;
+    transition: width 0.6s ease;
+  }
+}
+
+/* ─── Animation ──────────────────────────────────────────────────────────── */
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.slide-in-right { animation: slideInRight 0.3s cubic-bezier(0.16,1,0.3,1); }
+.fade-in        { animation: fadeIn 0.2s ease-out; }
+
+/* ─── Kanban drag ghost ──────────────────────────────────────────────────── */
+.dragging-card {
+  transform: rotate(2deg) scale(1.03);
+  box-shadow: 0 16px 48px rgba(0,103,52,0.25) !important;
+  opacity: 0.95;
+}
+
+/* ─── Badge ──────────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+/* ─── Checklist item ─────────────────────────────────────────────────────── */
+.checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  transition: background 0.15s;
+  cursor: pointer;
+}
+.checklist-item:hover { background: var(--hover); }
+.checklist-item.completed { opacity: 0.65; }
+
+/* ─── Table base ─────────────────────────────────────────────────────────── */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.data-table th {
+  background: #f0faf4;
+  color: var(--dtel-green);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 2px solid var(--border);
+}
+.data-table td {
+  padding: 9px 14px;
+  border-bottom: 1px solid #f0f4f2;
+  color: var(--text-primary);
+}
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover td { background: #f9fdfb; }
+
+/* ─── Sidebar active glow ────────────────────────────────────────────────── */
+.nav-active {
+  background: rgba(255,222,0,0.12);
+  color: var(--dtel-yellow) !important;
+  border-right: 3px solid var(--dtel-yellow);
+}

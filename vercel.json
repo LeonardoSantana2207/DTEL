@@ -1,0 +1,10 @@
+﻿{
+  "functions": {
+    "src/app/api/trello/sync/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/**": {
+      "maxDuration": 60
+    }
+  }
+}
