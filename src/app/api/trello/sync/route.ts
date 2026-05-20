@@ -103,19 +103,20 @@ function parseCheckItem(text: string): { code: string; team: string; date: strin
   if (!codeMatch) return null
   const code = codeMatch[1].toUpperCase().replace(/\s+/g, '-')
 
-  // Extrai data (dd/mm/yyyy ou dd/mm/yy)
+  // Extrai data (dd/mm/yyyy ou dd/mm/yy) — opcional, item incluído mesmo sem data
   const dateMatch = clean.match(/DATA[^:]*:\s*(\d{2}\/\d{2}\/(\d{2}|\d{4}))\b/i)
-  if (!dateMatch) return null
-  const rawDate = dateMatch[1]
-  // Normaliza ano de 2 dígitos: 21 → 2021
-  const date = rawDate.length === 8 ? rawDate.slice(0, 6) + '20' + rawDate.slice(6) : rawDate
+  let date = ''
+  if (dateMatch) {
+    const rawDate = dateMatch[1]
+    // Normaliza ano de 2 dígitos: 21 → 2021
+    date = rawDate.length === 8 ? rawDate.slice(0, 6) + '20' + rawDate.slice(6) : rawDate
+  }
 
   // Extrai equipe: o que fica entre o separador do código e o início do DATA
   const afterCode = clean.slice(codeMatch[0].length)
   const dataPos = afterCode.search(/DATA[^:]*:/i)
-  if (dataPos === -1) return null
 
-  let teamRaw = afterCode.slice(0, dataPos).trim()
+  let teamRaw = dataPos !== -1 ? afterCode.slice(0, dataPos).trim() : afterCode.trim()
   // Remove sufixo a partir de //
   teamRaw = teamRaw.replace(/\s*\/\/.*$/, '').trim()
   // Remove separadores e keywords em loop (ex: "SPLITTER - EQUIPE: ...")
@@ -130,7 +131,7 @@ function parseCheckItem(text: string): { code: string; team: string; date: strin
   // Remove trailing separators
   teamRaw = teamRaw.replace(/\s*[-–]+\s*$/, '').trim()
 
-  if (!teamRaw || teamRaw.length < 2) return null
+  // Inclui a área mesmo sem equipe ou data preenchidas
   return { code, team: teamRaw, date }
 }
 
