@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import {
   X, MapPin, ExternalLink, Ruler, Radio,
   CheckSquare, Zap, History, FileText, Cable, Save,
-  CheckCircle2, Clock, ChevronDown, AlertCircle
+  CheckCircle2, Clock, ChevronDown, AlertCircle, Check
 } from 'lucide-react'
 import type { Project, Collaborator, ProjectStatus, TrelloAreaItem } from '@/types'
 import { KANBAN_COLUMNS } from '@/types'
@@ -248,57 +248,87 @@ function AreaRow({ area, index, collaborators, onUpdate }: AreaRowProps) {
 
       {/* Expansão: form de execução */}
       {expanded && (
-        <div className="mx-3 mb-2 p-3 bg-[#f0faf4] border border-[#c6e8d2] rounded-xl space-y-2.5">
+        <div className="mx-3 mb-2 p-3 bg-[#f0faf4] border border-[#c6e8d2] rounded-xl space-y-3">
           <div className="text-[11px] font-bold text-[#006734] uppercase tracking-wide">
             {area.done ? `Editar execução — ${area.code}` : `Registrar execução — ${area.code}`}
           </div>
 
-          {/* Quem executou */}
-          <div>
-            <div className="text-[10px] font-semibold text-[#3a6347] uppercase tracking-wide mb-1">Quem executou</div>
-            <ExecutorSelect
-              executorIds={draft.executorIds}
-              collaborators={collaborators}
-              onChange={(ids) => setDraft(d => ({ ...d, executorIds: ids }))}
-            />
+          {/* Metros automático */}
+          <div className="flex items-center justify-between px-3 py-2 bg-white border border-[#d4e8dc] rounded-lg">
+            <span className="text-[10px] font-semibold text-[#3a6347] uppercase tracking-wide">Metros (KMZ)</span>
+            <span className="text-[13px] font-bold text-[#006734]">
+              {area.meters > 0
+                ? (area.meters >= 1000 ? `${(area.meters / 1000).toFixed(2)} km` : `${Math.round(area.meters)} m`)
+                : <span className="text-[#bbb] font-normal text-[11px] italic">sem dados KMZ</span>
+              }
+            </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            {/* Metros — automático do KMZ */}
-            <div>
-              <div className="text-[10px] font-semibold text-[#3a6347] uppercase tracking-wide mb-1">Metros (KMZ)</div>
-              <div className="flex items-center px-2 py-1.5 text-[12px] font-bold border border-[#d4e8dc] rounded-lg bg-[#f9fdfb] text-[#006734]">
-                {area.meters > 0
-                  ? (area.meters >= 1000 ? `${(area.meters / 1000).toFixed(2)} km` : `${Math.round(area.meters)} m`)
-                  : <span className="text-[#bbb] font-normal italic">sem dados</span>
-                }
-              </div>
+          {/* Quem executou — checkboxes */}
+          <div>
+            <div className="text-[10px] font-semibold text-[#3a6347] uppercase tracking-wide mb-1.5">Quem executou</div>
+            <div className="space-y-1">
+              {collaborators.filter(c => c.active !== false).map(c => {
+                const selected = draft.executorIds.includes(c.id)
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      const next = selected
+                        ? draft.executorIds.filter(i => i !== c.id)
+                        : [...draft.executorIds, c.id]
+                      setDraft(d => ({ ...d, executorIds: next }))
+                    }}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border transition-all text-left ${
+                      selected
+                        ? 'bg-[#e8f7ef] border-[#006734]'
+                        : 'bg-white border-[#e4eee8] hover:border-[#86c9a0]'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                      selected ? 'bg-[#006734] border-[#006734]' : 'border-[#c4d8cb]'
+                    }`}>
+                      {selected && <Check size={9} className="text-white" strokeWidth={3} />}
+                    </div>
+                    <span
+                      className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[8px] font-bold flex-shrink-0"
+                      style={{ backgroundColor: c.avatarColor }}
+                    >
+                      {c.initials ?? c.name.slice(0, 2).toUpperCase()}
+                    </span>
+                    <span className={`text-[12px] font-medium ${selected ? 'text-[#006734] font-semibold' : 'text-[#0d2517]'}`}>
+                      {c.name}
+                    </span>
+                  </button>
+                )
+              })}
             </div>
+          </div>
 
-            {/* Data */}
-            <div>
-              <div className="text-[10px] font-semibold text-[#3a6347] uppercase tracking-wide mb-1">Data de execução</div>
-              <input
-                type="date"
-                value={toInputDate(draft.date) || new Date().toISOString().split('T')[0]}
-                onChange={e => setDraft(d => ({ ...d, date: fromInputDate(e.target.value) }))}
-                className="w-full px-2 py-1.5 text-[12px] border border-[#d4e8dc] rounded-lg focus:outline-none focus:border-[#006734] bg-white text-[#0d2517]"
-              />
-            </div>
+          {/* Data — calendário */}
+          <div>
+            <div className="text-[10px] font-semibold text-[#3a6347] uppercase tracking-wide mb-1.5">Data de execução</div>
+            <input
+              type="date"
+              value={toInputDate(draft.date) || new Date().toISOString().split('T')[0]}
+              onChange={e => setDraft(d => ({ ...d, date: fromInputDate(e.target.value) }))}
+              className="w-full px-3 py-2 text-[13px] border border-[#d4e8dc] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#006734]/20 focus:border-[#006734] bg-white text-[#0d2517]"
+            />
           </div>
 
           <div className="flex gap-2 pt-0.5">
             <button
               type="button"
               onClick={() => setExpanded(false)}
-              className="flex-1 py-1.5 text-[12px] font-semibold text-[#6b8f74] border border-[#d4e8dc] rounded-lg hover:bg-white transition-colors"
+              className="flex-1 py-2 text-[12px] font-semibold text-[#6b8f74] border border-[#d4e8dc] rounded-lg hover:bg-white transition-colors"
             >
               Cancelar
             </button>
             <button
               type="button"
               onClick={confirmExecution}
-              className="flex-1 py-1.5 text-[12px] font-bold bg-[#006734] text-[#FFDE00] rounded-lg hover:bg-[#0a7a3e] transition-colors flex items-center justify-center gap-1"
+              className="flex-1 py-2 text-[12px] font-bold bg-[#006734] text-[#FFDE00] rounded-lg hover:bg-[#0a7a3e] transition-colors flex items-center justify-center gap-1"
             >
               <CheckCircle2 size={13} /> Confirmar
             </button>
