@@ -82,6 +82,29 @@ export interface ActivityLog {
   createdAt: string
 }
 
+// ─── Trello Label ─────────────────────────────────────────────────────────────
+
+export interface TrelloLabel {
+  name: string
+  color: string  // "green", "yellow", "red", "blue", etc.
+}
+
+// ─── Trello Area Item ─────────────────────────────────────────────────────────
+
+export interface TrelloAreaItem {
+  code: string        // "AAA", "AAB"
+  team: string        // raw team string from checklist
+  members: string[]   // split team members (names)
+  executorIds: string[]  // resolved collaborator IDs
+  meters: number
+  date: string        // "03/09/2024"
+  done: boolean
+  ctoCount?: number   // CTOs nesta área (do KMZ ou manual)
+  ceoCount?: number   // sempre 1 por projeto
+  source?: 'TRELLO' | 'KMZ' | 'MANUAL'
+  notes?: string
+}
+
 export interface Project {
   id: string
   name: string
@@ -100,7 +123,7 @@ export interface Project {
   trelloListId?: string | null
   trelloListName?: string | null
   trelloBoardId?: string | null
-  trelloLabels?: string[] | null
+  trelloLabels?: TrelloLabel[] | null
   trelloDesc?: string | null
 
   // KMZ
@@ -154,17 +177,6 @@ export const CHECKLIST_STEPS_CONFIG: { step: ChecklistStep; label: string; order
   { step: 'FUSION_DONE',       label: 'Fusão realizada',             order: 8 },
   { step: 'PROJECT_FINISHED',  label: 'Projeto finalizado',          order: 9 },
 ]
-
-// ─── Trello Area Item ────────────────────────────────────────────────────────
-
-export interface TrelloAreaItem {
-  code: string        // "AAA", "AAB"
-  team: string        // raw team string from checklist
-  members: string[]   // split team members
-  meters: number      // from KMZ area matching (0 if not found)
-  date: string        // "03/09/2024"
-  done: boolean       // checklist item state
-}
 
 // ─── KMZ ─────────────────────────────────────────────────────────────────────
 

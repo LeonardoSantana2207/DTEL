@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { DragDropContext, type DropResult } from '@hello-pangea/dnd'
-import { RefreshCw, Search, MapPin } from 'lucide-react'
+import { RefreshCw, Search, MapPin, Filter, X } from 'lucide-react'
 import type { Project } from '@/types'
 import KanbanColumn from './KanbanColumn'
 import ProjectModal from '../project/ProjectModal'
@@ -14,20 +14,28 @@ interface CityKmzData {
 }
 
 interface CityColumn {
-  id: string           // trelloListName
+  id: string
   label: string
   projects: Project[]
-  projectMeters: number   // soma de cableMeters dos projetos (área matching)
-  kmzData: CityKmzData | null  // total real do KMZ
+  projectMeters: number
+  kmzData: CityKmzData | null
 }
 
-// Listas do Trello que não são cidades de produção
 const NON_CITY_LISTS = new Set([
   'SOLICITAÇÕES - MAPAS',
   'DWDM Recife <-> Fortaleza',
   'MAPA ANEL ABREU E LIMA -> PAULISTA',
   'ALAN KLEBSON',
 ])
+
+type TypeFilter = 'all' | 'launch' | 'fusion' | 'other'
+
+function detectType(name: string): 'launch' | 'fusion' | 'other' {
+  const n = name.toLowerCase()
+  if (/lan[çc]amento/.test(n)) return 'launch'
+  if (/fus[ãa]o/.test(n)) return 'fusion'
+  return 'other'
+}
 
 export default function KanbanBoard() {
   const [projects, setProjects] = useState<Project[]>([])
@@ -36,6 +44,8 @@ export default function KanbanBoard() {
   const [error, setError] = useState<string | null>(null)
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
+  const [showFilters, setShowFilters] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
 
   const loadProjects = useCallback(async () => {
@@ -47,7 +57,6 @@ export default function KanbanBoard() {
       const data: Project[] = await res.json()
       setProjects(data)
 
-      // Busca totais KMZ por cidade (em background, sem bloquear o Kanban)
       const cities = Array.from(new Set(
         data.filter(p => p.trelloCardId && p.trelloListName && !NON_CITY_LISTS.has(p.trelloListName ?? ''))
             .map(p => p.trelloListName!)
@@ -57,7 +66,7 @@ export default function KanbanBoard() {
         fetch(`/api/kmz/city-totals?cities=${qs}`)
           .then(r => r.ok ? r.json() : null)
           .then(data => { if (data) setCityKmz(data) })
-          .catch(() => { /* silently fail */ })
+          .catch(() => {})
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro desconhecido')
@@ -77,10 +86,12 @@ export default function KanbanBoard() {
         !p.locality?.toLowerCase().includes(q)
       ) return false
     }
+    if (typeFilter !== 'all') {
+      if (detectType(p.name) !== typeFilter) return false
+    }
     return true
   })
 
-  // Agrupa por cidade (trelloListName), excluindo listas não-produção
   const cityMap = new Map<string, Project[]>()
   for (const p of filteredProjects) {
     const city = p.trelloListName ?? p.locality ?? 'Sem cidade'
@@ -103,7 +114,6 @@ export default function KanbanBoard() {
   async function onDragEnd(result: DropResult) {
     const { destination, source, draggableId } = result
     if (!destination) return
-    // Só reordena dentro da mesma cidade
     if (destination.droppableId !== source.droppableId) return
     if (destination.index === source.index) return
 
@@ -133,6 +143,14 @@ export default function KanbanBoard() {
 
   const totalCities = columns.length
   const totalMeters = columns.reduce((s, c) => s + (c.kmzData?.meters ?? c.projectMeters), 0)
+  const activeFilters = (typeFilter !== 'all' ? 1 : 0) + (searchQuery ? 1 : 0)
+
+  const TYPE_FILTERS: { value: TypeFilter; label: string; color: string; bg: string }[] = [
+    { value: 'all',    label: 'Todos',        color: '#64748B', bg: '#F1F5F9' },
+    { value: 'launch', label: 'Lançamento',   color: '#065F46', bg: '#D1FAE5' },
+    { value: 'fusion', label: 'Fusão',        color: '#4C1D95', bg: '#EDE9FE' },
+    { value: 'other',  label: 'Outros',       color: '#92400E', bg: '#FEF3C7' },
+  ]
 
   if (loading) {
     return (
@@ -163,9 +181,10 @@ export default function KanbanBoard() {
   }
 
   return (
-    <div className="flex flex-col h-full gap-4">
+    <div className="flex flex-col h-full gap-3">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* Search */}
         <div className="relative flex items-center">
           <Search size={14} className="absolute left-3 text-[#6b8f74]" />
           <input
@@ -174,26 +193,66 @@ export default function KanbanBoard() {
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="Buscar cidade ou rota..."
             className="
-              pl-9 pr-4 py-2 text-[13px]
+              pl-9 pr-8 py-2 text-[13px]
               bg-white border border-[#d4e8dc] rounded-lg
               text-[#0d2517] placeholder:text-[#6b8f74]
               focus:outline-none focus:ring-2 focus:ring-[#006734]/20 focus:border-[#006734]
-              w-60
+              w-56
             "
           />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} className="absolute right-2.5 text-[#6b8f74] hover:text-[#006734]">
+              <X size={12} />
+            </button>
+          )}
         </div>
 
+        {/* Type filter buttons */}
+        <div className="flex items-center gap-1 bg-white border border-[#d4e8dc] rounded-lg p-1">
+          {TYPE_FILTERS.map(f => (
+            <button
+              key={f.value}
+              onClick={() => setTypeFilter(f.value)}
+              className="px-2.5 py-1 rounded text-[11px] font-semibold transition-all"
+              style={typeFilter === f.value
+                ? { backgroundColor: f.bg, color: f.color }
+                : { color: '#6b8f74' }
+              }
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Active filter indicator */}
+        {activeFilters > 0 && (
+          <button
+            onClick={() => { setSearchQuery(''); setTypeFilter('all') }}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors"
+          >
+            <Filter size={11} />
+            Limpar filtros ({activeFilters})
+          </button>
+        )}
+
+        {/* Stats + refresh */}
         <div className="flex items-center gap-2 ml-auto text-[12px] text-[#6b8f74]">
           <MapPin size={12} className="text-[#006734]" />
           <span className="font-semibold text-[#0d2517]">{totalCities}</span>
           <span>cidades</span>
+          {columns.reduce((s, c) => s + c.projects.length, 0) > 0 && (
+            <>
+              <span className="text-[#d4e8dc]">·</span>
+              <span className="font-semibold text-[#0d2517]">{columns.reduce((s, c) => s + c.projects.length, 0)}</span>
+              <span>rotas</span>
+            </>
+          )}
           {totalMeters > 0 && (
             <>
               <span className="text-[#d4e8dc]">·</span>
               <span className="font-semibold text-[#006734]">
                 {(totalMeters / 1000).toFixed(1)} km
               </span>
-              <span>total</span>
             </>
           )}
           <button
@@ -206,7 +265,7 @@ export default function KanbanBoard() {
         </div>
       </div>
 
-      {/* Kanban board — colunas por cidade */}
+      {/* Kanban board */}
       <div className="flex-1 overflow-x-auto kanban-scroll pb-4">
         <DragDropContext onDragEnd={onDragEnd}>
           <div className="flex gap-3 min-h-[400px]" style={{ minWidth: 'max-content' }}>
@@ -218,8 +277,8 @@ export default function KanbanBoard() {
               />
             ))}
             {columns.length === 0 && (
-              <div className="flex items-center justify-center w-full text-[#6b8f74] text-sm">
-                Nenhuma cidade encontrada
+              <div className="flex items-center justify-center w-full py-20 text-[#6b8f74] text-sm">
+                {activeFilters > 0 ? 'Nenhum resultado para os filtros aplicados' : 'Nenhuma cidade encontrada'}
               </div>
             )}
           </div>

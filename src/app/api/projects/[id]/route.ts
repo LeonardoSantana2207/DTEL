@@ -31,7 +31,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const body = await req.json()
   const {
     name, code, locality, status, notes, dueDate, kanbanOrder,
-    launcherIds, cableMeters,
+    launcherIds, cableMeters, trelloAreaData,
   } = body
 
   const existing = await prisma.project.findUnique({ where: { id: params.id } })
@@ -47,6 +47,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (kanbanOrder !== undefined) updateData.kanbanOrder = kanbanOrder
   if (cableMeters !== undefined) updateData.cableMeters = cableMeters
   if (dueDate !== undefined) updateData.dueDate = dueDate ? new Date(dueDate) : null
+  if (trelloAreaData !== undefined) updateData.trelloAreaData = JSON.stringify(trelloAreaData)
 
   const project = await prisma.project.update({
     where: { id: params.id },

@@ -3,9 +3,13 @@ import { PrismaClient } from '@prisma/client'
 const prisma = new PrismaClient()
 
 const COLLABORATORS = [
+  // Lançamento
   { name: 'Carlos Fernando', initials: 'CF', avatarColor: '#006734', role: 'LAUNCHER' },
   { name: 'Daniel José',     initials: 'DJ', avatarColor: '#0a7a3e', role: 'LAUNCHER' },
   { name: 'Daniel China',    initials: 'DC', avatarColor: '#1a9e52', role: 'LAUNCHER' },
+  { name: 'Daniel Antonio',  initials: 'DA', avatarColor: '#2D9A2D', role: 'LAUNCHER' },
+  { name: 'Severino',        initials: 'SE', avatarColor: '#1565C0', role: 'LAUNCHER' },
+  // Fusão
   { name: 'Roberto',         initials: 'RO', avatarColor: '#8B5CF6', role: 'FUSION' },
   { name: 'Valdir',          initials: 'VA', avatarColor: '#7C3AED', role: 'FUSION' },
   { name: 'Diego',           initials: 'DI', avatarColor: '#6D28D9', role: 'FUSION' },

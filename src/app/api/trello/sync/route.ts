@@ -14,6 +14,7 @@ interface ParsedArea {
   code: string                  // "AAA", "AAB"…
   teamRaw: string               // "Daniel Antonio + Severino"
   teamMembers: string[]         // ["Daniel Antonio", "Severino"]
+  executorIds: string[]         // IDs dos colaboradores resolvidos
   dateRaw: string               // "03/09/2024"
   done: boolean
   meters: number                // vem do KMZ
@@ -23,9 +24,11 @@ type AreaForDB = {
   code: string
   team: string
   members: string[]
+  executorIds: string[]
   meters: number
   date: string
   done: boolean
+  source: 'TRELLO' | 'KMZ' | 'MANUAL'
 }
 
 interface ParsedCard {
@@ -256,10 +259,18 @@ export async function POST() {
                 cardMeters += areaMeters
               }
 
+              const teamMembers = splitTeam(p.team)
+              const executorIds: string[] = []
+              for (const member of teamMembers) {
+                const id = await findOrCreateCollaborator(member)
+                if (id) executorIds.push(id)
+              }
+
               areasItems.push({
                 code: p.code,
                 teamRaw: p.team,
-                teamMembers: splitTeam(p.team),
+                teamMembers,
+                executorIds,
                 dateRaw: p.date,
                 done: item.state === 'complete',
                 meters: areaMeters,
@@ -279,9 +290,11 @@ export async function POST() {
           code: a.code,
           team: a.teamRaw,
           members: a.teamMembers,
+          executorIds: a.executorIds,
           meters: a.meters,
           date: a.dateRaw,
           done: a.done,
+          source: 'TRELLO' as const,
         }))
 
         // Código do projeto: ex "GRV-OLT_A-R1-LANC"
@@ -308,7 +321,7 @@ export async function POST() {
               trelloListName: list.name,
               trelloCardUrl: card.shortUrl,
               trelloDesc: card.desc,
-              trelloLabels: JSON.stringify(card.labels?.map(l => l.name) ?? []),
+              trelloLabels: JSON.stringify(card.labels?.map(l => ({ name: l.name, color: l.color ?? 'black' })) ?? []),
               ...(cardMeters > 0 && { cableMeters: cardMeters }),
               ...(Object.keys(cardAreas).length > 0 && { kmzRawAreas: JSON.stringify(cardAreas) }),
               ...(kmzInfo && { kmzFilePath: kmzInfo.filePath, kmzFileName: kmzInfo.fileName, kmzLastParsed: new Date() }),
@@ -330,7 +343,7 @@ export async function POST() {
               trelloListName: list.name,
               trelloBoardId: boardId,
               trelloDesc: card.desc,
-              trelloLabels: JSON.stringify(card.labels?.map(l => l.name) ?? []),
+              trelloLabels: JSON.stringify(card.labels?.map(l => ({ name: l.name, color: l.color ?? 'black' })) ?? []),
               cableMeters: cardMeters > 0 ? cardMeters : null,
               ctoCount: kmzInfo?.ctoCount ?? null,
               kmzFilePath: kmzInfo?.filePath ?? null,

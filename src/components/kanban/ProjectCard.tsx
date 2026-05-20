@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Draggable } from '@hello-pangea/dnd'
 import { Ruler, Radio, ExternalLink, CheckSquare, CheckCircle2, Clock, ChevronDown, ChevronRight } from 'lucide-react'
-import type { Project, ProjectStatus, TrelloAreaItem } from '@/types'
+import type { Project, ProjectStatus, TrelloAreaItem, TrelloLabel } from '@/types'
 import { formatMeters } from '@/lib/utils'
 
 interface Props {
@@ -11,6 +11,22 @@ interface Props {
   index: number
   cityName: string
   onClick: (project: Project) => void
+}
+
+// Mapeamento de cores do Trello para hex
+const TRELLO_COLORS: Record<string, string> = {
+  green:       '#61BD4F',
+  yellow_green:'#D2E043',
+  yellow:      '#F2D600',
+  orange:      '#FF9F1A',
+  red:         '#EB5A46',
+  purple:      '#C377E0',
+  blue:        '#0079BF',
+  sky:         '#00C2E0',
+  lime:        '#51E898',
+  pink:        '#FF78CB',
+  black:       '#344563',
+  null:        '#B3BAC5',
 }
 
 const STATUS_BADGE: Record<ProjectStatus, { label: string; color: string; bg: string }> = {
@@ -50,6 +66,25 @@ function getTypeBadge(name: string): { label: string; color: string; bg: string 
   return null
 }
 
+function TrelloLabels({ labels }: { labels: TrelloLabel[] }) {
+  if (!labels.length) return null
+  return (
+    <div className="flex gap-1 px-2.5 pt-2.5 pb-0 flex-wrap">
+      {labels.slice(0, 6).map((label, i) => {
+        const hex = TRELLO_COLORS[label.color] ?? TRELLO_COLORS['null']
+        return (
+          <div
+            key={i}
+            title={label.name || label.color}
+            className="h-2 rounded-sm min-w-[32px] flex-1 max-w-[72px] transition-all duration-150 hover:opacity-80"
+            style={{ backgroundColor: hex }}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
 function AreaChecklist({ areas }: { areas: TrelloAreaItem[] }) {
   const done = areas.filter(a => a.done).length
   const total = areas.length
@@ -67,11 +102,13 @@ function AreaChecklist({ areas }: { areas: TrelloAreaItem[] }) {
         onClick={() => setExpanded(o => !o)}
         className="w-full flex items-center gap-1.5 hover:bg-[#f5fbf7] rounded px-0.5 py-0.5 transition-colors"
       >
-        <CheckSquare size={10} className={isComplete ? 'text-[#006734]' : 'text-[#6b8f74]'} />
-        <span className={`text-[10px] font-bold ${isComplete ? 'text-[#006734]' : 'text-[#6b8f74]'}`}>
+        {isComplete
+          ? <CheckCircle2 size={11} className="text-[#006734] flex-shrink-0" />
+          : <CheckSquare size={11} className="text-[#6b8f74] flex-shrink-0" />
+        }
+        <span className={`text-[10px] font-bold tabular-nums ${isComplete ? 'text-[#006734]' : 'text-[#6b8f74]'}`}>
           {done}/{total}
         </span>
-        {/* Mini progress bar */}
         <div className="flex-1 h-1.5 bg-[#e4eee8] rounded-full overflow-hidden mx-1">
           <div
             className="h-full rounded-full transition-all duration-500"
@@ -79,16 +116,18 @@ function AreaChecklist({ areas }: { areas: TrelloAreaItem[] }) {
               width: `${pct}%`,
               background: isComplete
                 ? 'linear-gradient(90deg, #006734, #1a9e52)'
-                : 'linear-gradient(90deg, #006734 0%, #1a9e52 60%, #FEBF11 100%)',
+                : pct > 0
+                  ? 'linear-gradient(90deg, #006734 0%, #1a9e52 60%, #FEBF11 100%)'
+                  : '#e4eee8',
             }}
           />
         </div>
-        <span className={`text-[10px] font-bold ${isComplete ? 'text-[#006734]' : 'text-[#FEBF11]'}`}>
+        <span className={`text-[10px] font-bold tabular-nums ${isComplete ? 'text-[#006734]' : 'text-[#FEBF11]'}`}>
           {pct}%
         </span>
         {expanded
-          ? <ChevronDown size={9} className="text-[#6b8f74] ml-0.5" />
-          : <ChevronRight size={9} className="text-[#6b8f74] ml-0.5" />
+          ? <ChevronDown size={9} className="text-[#6b8f74] ml-0.5 flex-shrink-0" />
+          : <ChevronRight size={9} className="text-[#6b8f74] ml-0.5 flex-shrink-0" />
         }
       </button>
 
@@ -104,11 +143,11 @@ function AreaChecklist({ areas }: { areas: TrelloAreaItem[] }) {
                 ? <CheckCircle2 size={10} className="text-[#006734] flex-shrink-0" />
                 : <Clock size={10} className="text-[#FEBF11] flex-shrink-0" />
               }
-              <span className={`font-bold font-mono text-[9px] px-1 py-0.5 rounded ${a.done ? 'bg-[#d4f0de] text-[#006734]' : 'bg-[#edf5ef] text-[#0d2517]'}`}>
+              <span className={`font-bold font-mono text-[9px] px-1 py-0.5 rounded flex-shrink-0 ${a.done ? 'bg-[#d4f0de] text-[#006734]' : 'bg-[#edf5ef] text-[#0d2517]'}`}>
                 {a.code}
               </span>
               <span className={`flex-1 truncate ${a.done ? 'line-through text-[#6b8f74]' : 'text-[#0d2517] font-medium'}`}>
-                {a.members.join(' + ') || a.team || '—'}
+                {a.members?.join(' + ') || a.team || '—'}
               </span>
               {a.meters > 0 && (
                 <span className="text-[9px] font-semibold text-[#006734] flex-shrink-0">
@@ -134,6 +173,13 @@ export default function ProjectCard({ project, index, cityName, onClick }: Props
   const launchers = (project.collaborators ?? []).filter(c => c.role === 'LAUNCHER')
   const areaItems: TrelloAreaItem[] = project.trelloAreaData ?? []
 
+  // trelloLabels pode ser TrelloLabel[] ou string[] (retrocompat)
+  const labels: TrelloLabel[] = Array.isArray(project.trelloLabels)
+    ? project.trelloLabels.map(l =>
+        typeof l === 'string' ? { name: l, color: 'black' } : l as TrelloLabel
+      )
+    : []
+
   return (
     <Draggable draggableId={project.id} index={index}>
       {(provided, snapshot) => (
@@ -155,6 +201,9 @@ export default function ProjectCard({ project, index, cityName, onClick }: Props
         >
           {/* Status color bar */}
           <div className="h-[3px] rounded-t-xl" style={{ backgroundColor: topColor }} />
+
+          {/* Trello-style colored label bars */}
+          {labels.length > 0 && <TrelloLabels labels={labels} />}
 
           <div className="p-2.5">
             {/* Route label */}
@@ -189,7 +238,7 @@ export default function ProjectCard({ project, index, cityName, onClick }: Props
                     <span>{formatMeters(project.cableMeters)}</span>
                   </div>
                 )}
-                {project.ctoCount != null && (
+                {project.ctoCount != null && project.ctoCount > 0 && (
                   <div className="flex items-center gap-1 text-[10px] text-[#6b8f74]">
                     <Radio size={10} />
                     <span>{project.ctoCount} CTOs</span>
@@ -203,14 +252,15 @@ export default function ProjectCard({ project, index, cityName, onClick }: Props
               <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-[#f0faf4]">
                 <div className="flex -space-x-1">
                   {launchers.slice(0, 4).map(c => {
-                    const initials = c.collaborator.name.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase()
+                    const initials = c.collaborator.initials ??
+                      c.collaborator.name.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase()
                     return (
                       <span
                         key={c.id}
                         title={c.collaborator.name}
                         className="inline-flex items-center justify-center rounded-full text-white font-bold ring-1 ring-white flex-shrink-0"
                         style={{
-                          width: 18, height: 18, fontSize: 7,
+                          width: 20, height: 20, fontSize: 8,
                           backgroundColor: c.collaborator.avatarColor,
                         }}
                       >
@@ -221,7 +271,7 @@ export default function ProjectCard({ project, index, cityName, onClick }: Props
                   {launchers.length > 4 && (
                     <span
                       className="inline-flex items-center justify-center rounded-full bg-[#e4eee8] text-[#006734] font-bold ring-1 ring-white text-[7px]"
-                      style={{ width: 18, height: 18 }}
+                      style={{ width: 20, height: 20 }}
                     >
                       +{launchers.length - 4}
                     </span>
@@ -233,7 +283,7 @@ export default function ProjectCard({ project, index, cityName, onClick }: Props
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={e => e.stopPropagation()}
-                    className="text-[#0052cc] hover:text-blue-700 opacity-50 hover:opacity-100"
+                    className="text-[#0052cc] hover:text-blue-700 opacity-40 hover:opacity-100 transition-opacity"
                     title="Ver no Trello"
                   >
                     <ExternalLink size={10} />
