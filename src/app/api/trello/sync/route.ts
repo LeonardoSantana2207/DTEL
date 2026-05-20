@@ -1,10 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { fetchLists, fetchCards, fetchBoardChecklists } from '@/lib/trello'
-import { findKMZForProject, parseKMZFile } from '@/lib/kmz'
 import { CHECKLIST_STEPS_CONFIG } from '@/types'
-import * as fs from 'fs'
-import * as path from 'path'
 
 export const maxDuration = 60
 
@@ -208,39 +205,6 @@ class CollaboratorCache {
   }
 }
 
-// ─── KMZ cache por cidade ─────────────────────────────────────────────────────
-
-type KmzCacheEntry = {
-  areas: Record<string, number>
-  filePath: string
-  fileName: string
-  ctoCount: number
-  rawTotalMeters: number
-}
-
-const kmzCache = new Map<string, KmzCacheEntry>()
-
-async function loadKMZForCity(cityName: string): Promise<KmzCacheEntry | null> {
-  const key = normalizeName(cityName)
-  if (kmzCache.has(key)) return kmzCache.get(key)!
-
-  const filePath = findKMZForProject(cityName)
-  if (!filePath) return null
-
-  const result = await parseKMZFile(filePath)
-  if (!result.success) return null
-
-  const entry: KmzCacheEntry = {
-    areas: result.areas ?? {},
-    filePath,
-    fileName: result.fileName ?? path.basename(filePath),
-    ctoCount: result.ctoCount ?? 0,
-    rawTotalMeters: result.rawTotalMeters ?? 0,
-  }
-  kmzCache.set(key, entry)
-  return entry
-}
-
 // ─── Sync principal ───────────────────────────────────────────────────────────
 
 export async function POST() {
@@ -249,9 +213,6 @@ export async function POST() {
     return NextResponse.json({ error: 'Trello não configurado' }, { status: 400 })
   }
 
-  kmzCache.clear()
-
-  // Pré-carrega tudo em paralelo antes do loop de cards
   const collabCache = new CollaboratorCache()
 
   const t0 = Date.now()
@@ -260,7 +221,7 @@ export async function POST() {
   console.log(`[sync] fetchLists: ${Date.now()-t0}ms, ${openLists.length} listas`)
 
   const t1 = Date.now()
-  const [, allChecklists, existingProjects, listCards, kmzByCity] = await Promise.all([
+  const [, allChecklists, existingProjects, listCards] = await Promise.all([
     collabCache.load(),
     fetchBoardChecklists(boardId),
     prisma.project.findMany({ select: { id: true, code: true, trelloCardId: true, trelloAreaData: true, status: true, name: true } }),
@@ -271,13 +232,6 @@ export async function POST() {
           .catch(() => ({ list, cards: [] as Awaited<ReturnType<typeof fetchCards>> }))
       )
     ),
-    // Carrega todos os KMZs em paralelo
-    Promise.all(openLists.map(list => loadKMZForCity(list.name).catch(() => null)))
-      .then(results => {
-        const m = new Map<string, Awaited<ReturnType<typeof loadKMZForCity>>>()
-        openLists.forEach((list, i) => m.set(list.name, results[i]))
-        return m
-      }),
   ])
   console.log(`[sync] pré-carga paralela: ${Date.now()-t1}ms, ${allChecklists.size} cards com checklist, ${existingProjects.length} projetos no DB`)
 
@@ -292,7 +246,6 @@ export async function POST() {
   try {
     for (const { list, cards } of listCards) {
       const cityName = list.name
-      const kmzInfo = kmzByCity.get(cityName) ?? null
 
       for (const card of cards) {
         if (card.closed) continue
@@ -302,10 +255,10 @@ export async function POST() {
         const parsed = parseCardName(card.name, cityName)
         parsed.isFinished = isFinished
 
-        // Lookup antecipado para preservar metros existentes quando KMZ não está disponível
+        // Preserva metros existentes do DB (populados via Sync Metros / Buscar KMZ)
         const existingByTrelloEarly = projectByCardId.get(card.id) ?? null
-        let existingMeters: Record<string, number> = {}
-        if (!kmzInfo && existingByTrelloEarly?.trelloAreaData) {
+        const existingMeters: Record<string, number> = {}
+        if (existingByTrelloEarly?.trelloAreaData) {
           try {
             const prev = JSON.parse(existingByTrelloEarly.trelloAreaData) as AreaForDB[]
             for (const a of prev) { if (a.meters > 0) existingMeters[a.code] = a.meters }
@@ -314,12 +267,11 @@ export async function POST() {
 
         // Busca checklists
         let areasItems: ParsedArea[] = []
+        const cardAreas: Record<string, number> = {}
         let cardMeters = 0
-        let cardAreas: Record<string, number> = {}
 
         try {
           const checklists = allChecklists.get(card.id) ?? []
-          // Procura checklist "Áreas" (pode ter variações)
           const areasChk = checklists.find(cl =>
             /^[áa]reas?$/i.test(cl.name.trim()) ||
             /^[áa]reas?\s+de\s+lan/i.test(cl.name)
@@ -330,7 +282,7 @@ export async function POST() {
               const p = parseCheckItem(item.name)
               if (!p) continue
 
-              const areaMeters = kmzInfo?.areas[p.code] ?? existingMeters[p.code] ?? 0
+              const areaMeters = existingMeters[p.code] ?? 0
               if (areaMeters > 0) {
                 cardAreas[p.code] = areaMeters
                 cardMeters += areaMeters
@@ -406,7 +358,6 @@ export async function POST() {
                 trelloLabels: JSON.stringify(card.labels?.map(l => ({ name: l.name, color: l.color ?? 'black' })) ?? []),
                 ...(cardMeters > 0 && { cableMeters: cardMeters }),
                 ...(Object.keys(cardAreas).length > 0 && { kmzRawAreas: JSON.stringify(cardAreas) }),
-                ...(kmzInfo && { kmzFilePath: kmzInfo.filePath, kmzFileName: kmzInfo.fileName, kmzLastParsed: new Date() }),
                 ...(newAreaJSON && { trelloAreaData: newAreaJSON }),
               },
             })
@@ -428,11 +379,7 @@ export async function POST() {
               trelloDesc: card.desc,
               trelloLabels: JSON.stringify(card.labels?.map(l => ({ name: l.name, color: l.color ?? 'black' })) ?? []),
               cableMeters: cardMeters > 0 ? cardMeters : null,
-              ctoCount: kmzInfo?.ctoCount ?? null,
-              kmzFilePath: kmzInfo?.filePath ?? null,
-              kmzFileName: kmzInfo?.fileName ?? null,
               kmzRawAreas: Object.keys(cardAreas).length > 0 ? JSON.stringify(cardAreas) : null,
-              kmzLastParsed: kmzInfo ? new Date() : null,
               trelloAreaData: areaDataForDB.length > 0 ? JSON.stringify(areaDataForDB) : null,
             },
           })
@@ -447,14 +394,6 @@ export async function POST() {
               completed: false,
             })),
           })
-
-          // Marca automaticamente KMZ_LOCATED e CABLE_MEASURED se kmz encontrado
-          if (kmzInfo) {
-            await prisma.checklistItem.updateMany({
-              where: { projectId, step: { in: ['KMZ_LOCATED', 'CABLE_MEASURED', 'CTO_COUNTED'] } },
-              data: { completed: true, completedAt: new Date() },
-            })
-          }
 
           projectsCreated++
         }

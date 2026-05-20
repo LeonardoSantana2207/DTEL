@@ -40,7 +40,7 @@ export async function POST(req: Request) {
 
   const EMPTY_RESULT: AreasDetalhadasResult = { areas: {}, ctos: {}, areasDirPath: null }
 
-  for (const [city, cityProjects] of byCityMap) {
+  for (const [city, cityProjects] of Array.from(byCityMap)) {
     const cityDir = findCityDir(city)
     if (!cityDir) { skipped.push(city); continue }
 

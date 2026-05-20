@@ -39,24 +39,23 @@ export default function KmzDataPanel({ project, onUpdate }: Props) {
   }
 
   async function handleReparse() {
-    if (!project.kmzFilePath) return
     setParsing(true)
     setMessage(null)
     try {
       const res = await fetch('/api/kmz/parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: project.id, filePath: project.kmzFilePath }),
+        body: JSON.stringify({ projectId: project.id }),
       })
       const data = await res.json()
       if (data.success) {
         onUpdate({ ...project, ...data.project })
-        setMessage({ type: 'ok', text: 'Dados recalculados com sucesso!' })
+        setMessage({ type: 'ok', text: 'Áreas Detalhadas processadas com sucesso!' })
       } else {
-        setMessage({ type: 'err', text: data.error ?? 'Erro ao processar KMZ' })
+        setMessage({ type: 'err', text: data.error ?? 'Erro ao processar Áreas Detalhadas' })
       }
     } catch {
-      setMessage({ type: 'err', text: 'Erro ao processar KMZ' })
+      setMessage({ type: 'err', text: 'Erro ao processar Áreas Detalhadas' })
     } finally {
       setParsing(false)
     }
