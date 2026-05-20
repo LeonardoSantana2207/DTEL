@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import {
   X, MapPin, ExternalLink, Ruler, Radio,
   CheckSquare, Zap, History, FileText, Cable, Save,
-  CheckCircle2, Clock, ChevronDown, AlertCircle, Users
+  CheckCircle2, Clock, ChevronDown, AlertCircle
 } from 'lucide-react'
 import type { Project, Collaborator, ProjectStatus, TrelloAreaItem } from '@/types'
 import { KANBAN_COLUMNS } from '@/types'
@@ -206,6 +206,12 @@ function AreaRow({ area, index, collaborators, onUpdate }: AreaRowProps) {
     .join(' + ')
 
   const teamLabel = executorNames || area.members?.map(m => m.split(' ')[0]).join(' + ') || area.team || ''
+  const metersLabel = area.meters > 0
+    ? (area.meters >= 1000 ? `${(area.meters / 1000).toFixed(2)}km` : `${Math.round(area.meters)}m`)
+    : ''
+
+  // Linha única no formato Trello: AAA - EQUIPE: X - DATA DE EXECUÇÃO: D - 1250m
+  const lineText = `${area.code} - EQUIPE: ${teamLabel} - DATA DE EXECUÇÃO: ${area.date || ''}${metersLabel ? ` - ${metersLabel}` : ''}`
 
   return (
     <div className={`border-b border-[#f0f4f2] last:border-0 ${area.done ? 'bg-[#f9fdfb]' : 'bg-white'}`}>
@@ -224,43 +230,20 @@ function AreaRow({ area, index, collaborators, onUpdate }: AreaRowProps) {
           }
         </button>
 
-        {/* Código */}
-        <span className={`flex-shrink-0 text-[11px] font-bold font-mono px-1.5 py-0.5 rounded min-w-[36px] text-center
-          ${area.done ? 'bg-[#d4f0de] text-[#006734] line-through opacity-60' : 'bg-[#edf5ef] text-[#0d2517]'}`}
+        {/* Linha de texto no formato Trello */}
+        <span className={`flex-1 text-[12px] min-w-0 ${area.done ? 'line-through text-[#9eb8a8]' : 'text-[#0d2517]'}`}>
+          {lineText}
+        </span>
+
+        {/* Botão editar */}
+        <button
+          type="button"
+          onClick={() => { setDraft({ executorIds: area.executorIds ?? [], meters: area.meters ?? 0, date: area.date ?? '' }); setExpanded(e => !e) }}
+          className="flex-shrink-0 text-[10px] text-[#bbb] hover:text-[#006734] transition-colors px-1"
+          title="Editar execução"
         >
-          {area.code}
-        </span>
-
-        {/* Equipe */}
-        <span className={`flex-1 text-[12px] truncate min-w-0 ${area.done ? 'text-[#9eb8a8] line-through' : 'text-[#3a5c46]'}`}>
-          {teamLabel ? `EQUIPE: ${teamLabel}` : <span className="text-[#bbb] italic">sem equipe</span>}
-        </span>
-
-        {/* Data */}
-        {area.date && (
-          <span className={`flex-shrink-0 text-[10px] font-mono ${area.done ? 'text-[#9eb8a8]' : 'text-[#6b8f74]'}`}>
-            {area.date}
-          </span>
-        )}
-
-        {/* Metros */}
-        {area.meters > 0 && (
-          <span className={`flex-shrink-0 text-[11px] font-bold ${area.done ? 'text-[#9eb8a8]' : 'text-[#006734]'}`}>
-            {area.meters >= 1000 ? `${(area.meters / 1000).toFixed(2)}km` : `${Math.round(area.meters)}m`}
-          </span>
-        )}
-
-        {/* Botão editar se já feito */}
-        {area.done && (
-          <button
-            type="button"
-            onClick={() => { setDraft({ executorIds: area.executorIds ?? [], meters: area.meters ?? 0, date: area.date ?? '' }); setExpanded(e => !e) }}
-            className="flex-shrink-0 text-[10px] text-[#9eb8a8] hover:text-[#006734] transition-colors px-1"
-            title="Editar execução"
-          >
-            ✎
-          </button>
-        )}
+          ✎
+        </button>
       </div>
 
       {/* Expansão: form de execução */}
@@ -721,19 +704,8 @@ export default function ProjectModal({ project: initialProject, onClose, onUpdat
                 </div>
               ) : (
                 <>
-                  {/* Table */}
+                  {/* Lista de áreas */}
                   <div className="border border-[#e4eee8] rounded-xl overflow-hidden">
-                    {/* Header */}
-                    <div className="flex items-center gap-2 px-3 py-2 bg-[#f0faf4] border-b border-[#e4eee8]">
-                      <div className="w-5 flex-shrink-0" />
-                      <div className="text-[9px] font-bold text-[#3a6347] uppercase tracking-wide w-9 text-center">Área</div>
-                      <div className="text-[9px] font-bold text-[#3a6347] uppercase tracking-wide flex-1 flex items-center gap-1">
-                        <Users size={9} /> Equipe
-                      </div>
-                      <div className="text-[9px] font-bold text-[#3a6347] uppercase tracking-wide">Data</div>
-                      <div className="text-[9px] font-bold text-[#3a6347] uppercase tracking-wide">Metros</div>
-                    </div>
-
                     <div className="max-h-[420px] overflow-y-auto">
                       {editedAreas.map((area, i) => (
                         <AreaRow
