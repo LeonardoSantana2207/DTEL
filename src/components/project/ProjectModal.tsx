@@ -193,7 +193,7 @@ function AreaRow({ area, index, collaborators, onUpdate }: AreaRowProps) {
       done: true,
       executorIds: draft.executorIds,
       members: names,
-      meters: draft.meters,
+      meters: area.meters > 0 ? area.meters : draft.meters,
       date: draft.date || fromInputDate(new Date().toISOString().split('T')[0]),
       source: 'MANUAL',
     })
@@ -264,16 +264,15 @@ function AreaRow({ area, index, collaborators, onUpdate }: AreaRowProps) {
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            {/* Metros */}
+            {/* Metros — automático do KMZ */}
             <div>
-              <div className="text-[10px] font-semibold text-[#3a6347] uppercase tracking-wide mb-1">Metros lançados</div>
-              <input
-                type="number"
-                value={draft.meters || ''}
-                onChange={e => setDraft(d => ({ ...d, meters: parseFloat(e.target.value) || 0 }))}
-                placeholder={area.meters > 0 ? String(Math.round(area.meters)) : '—'}
-                className="w-full px-2 py-1.5 text-[12px] font-semibold border border-[#d4e8dc] rounded-lg focus:outline-none focus:border-[#006734] bg-white text-[#0d2517]"
-              />
+              <div className="text-[10px] font-semibold text-[#3a6347] uppercase tracking-wide mb-1">Metros (KMZ)</div>
+              <div className="flex items-center px-2 py-1.5 text-[12px] font-bold border border-[#d4e8dc] rounded-lg bg-[#f9fdfb] text-[#006734]">
+                {area.meters > 0
+                  ? (area.meters >= 1000 ? `${(area.meters / 1000).toFixed(2)} km` : `${Math.round(area.meters)} m`)
+                  : <span className="text-[#bbb] font-normal italic">sem dados</span>
+                }
+              </div>
             </div>
 
             {/* Data */}
