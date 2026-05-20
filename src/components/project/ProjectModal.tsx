@@ -160,7 +160,7 @@ function ExecutorSelect({ executorIds, collaborators, onChange }: ExecutorSelect
   )
 }
 
-// ─── Linha de área editável ───────────────────────────────────────────────────
+// ─── Linha de área — estilo Trello com expansão na execução ──────────────────
 
 interface AreaRowProps {
   area: TrelloAreaItem
@@ -170,82 +170,159 @@ interface AreaRowProps {
 }
 
 function AreaRow({ area, index, collaborators, onUpdate }: AreaRowProps) {
-  return (
-    <div className={`
-      grid grid-cols-[28px_64px_1fr_76px_80px_44px_36px_60px]
-      items-center gap-1 px-3 py-2
-      border-b border-[#f0f4f2] last:border-0
-      ${area.done ? 'bg-[#f9fdfb]' : 'bg-white hover:bg-[#fafffe]'}
-      transition-colors
-    `}>
-      {/* Done toggle */}
-      <button
-        type="button"
-        onClick={() => onUpdate(index, { done: !area.done, source: 'MANUAL' })}
-        className="flex items-center justify-center"
-        title={area.done ? 'Marcar como pendente' : 'Marcar como concluído'}
-      >
-        {area.done
-          ? <CheckCircle2 size={15} className="text-[#006734]" />
-          : <div className="w-[15px] h-[15px] rounded border-2 border-[#d4e8dc] hover:border-[#006734] transition-colors" />
-        }
-      </button>
+  const [expanded, setExpanded] = useState(false)
+  const [draft, setDraft] = useState({
+    executorIds: area.executorIds ?? [],
+    meters: area.meters ?? 0,
+    date: area.date ?? '',
+  })
 
-      {/* Código */}
-      <div className="flex items-center">
-        <span className={`text-[11px] font-bold font-mono px-1.5 py-0.5 rounded ${area.done ? 'bg-[#d4f0de] text-[#006734] line-through opacity-60' : 'bg-[#edf5ef] text-[#0d2517]'}`}>
+  function handleCheckClick() {
+    if (area.done) {
+      onUpdate(index, { done: false, source: 'MANUAL' })
+      setExpanded(false)
+    } else {
+      setDraft({ executorIds: area.executorIds ?? [], meters: area.meters ?? 0, date: area.date ?? '' })
+      setExpanded(true)
+    }
+  }
+
+  function confirmExecution() {
+    const names = draft.executorIds.map(id => collaborators.find(c => c.id === id)?.name ?? '').filter(Boolean)
+    onUpdate(index, {
+      done: true,
+      executorIds: draft.executorIds,
+      members: names,
+      meters: draft.meters,
+      date: draft.date || fromInputDate(new Date().toISOString().split('T')[0]),
+      source: 'MANUAL',
+    })
+    setExpanded(false)
+  }
+
+  const executorNames = (area.executorIds ?? [])
+    .map(id => collaborators.find(c => c.id === id)?.name.split(' ')[0])
+    .filter(Boolean)
+    .join(' + ')
+
+  const teamLabel = executorNames || area.members?.map(m => m.split(' ')[0]).join(' + ') || area.team || ''
+
+  return (
+    <div className={`border-b border-[#f0f4f2] last:border-0 ${area.done ? 'bg-[#f9fdfb]' : 'bg-white'}`}>
+      {/* Row principal */}
+      <div className="flex items-center gap-2 px-3 py-2 hover:bg-[#f9fdfc] transition-colors">
+        {/* Checkbox */}
+        <button
+          type="button"
+          onClick={handleCheckClick}
+          className="flex-shrink-0 flex items-center justify-center w-5 h-5"
+          title={area.done ? 'Desmarcar' : 'Marcar como executado'}
+        >
+          {area.done
+            ? <CheckCircle2 size={16} className="text-[#006734]" />
+            : <div className="w-4 h-4 rounded border-2 border-[#d4e8dc] hover:border-[#006734] transition-colors" />
+          }
+        </button>
+
+        {/* Código */}
+        <span className={`flex-shrink-0 text-[11px] font-bold font-mono px-1.5 py-0.5 rounded min-w-[36px] text-center
+          ${area.done ? 'bg-[#d4f0de] text-[#006734] line-through opacity-60' : 'bg-[#edf5ef] text-[#0d2517]'}`}
+        >
           {area.code}
         </span>
+
+        {/* Equipe */}
+        <span className={`flex-1 text-[12px] truncate min-w-0 ${area.done ? 'text-[#9eb8a8] line-through' : 'text-[#3a5c46]'}`}>
+          {teamLabel ? `EQUIPE: ${teamLabel}` : <span className="text-[#bbb] italic">sem equipe</span>}
+        </span>
+
+        {/* Data */}
+        {area.date && (
+          <span className={`flex-shrink-0 text-[10px] font-mono ${area.done ? 'text-[#9eb8a8]' : 'text-[#6b8f74]'}`}>
+            {area.date}
+          </span>
+        )}
+
+        {/* Metros */}
+        {area.meters > 0 && (
+          <span className={`flex-shrink-0 text-[11px] font-bold ${area.done ? 'text-[#9eb8a8]' : 'text-[#006734]'}`}>
+            {area.meters >= 1000 ? `${(area.meters / 1000).toFixed(2)}km` : `${Math.round(area.meters)}m`}
+          </span>
+        )}
+
+        {/* Botão editar se já feito */}
+        {area.done && (
+          <button
+            type="button"
+            onClick={() => { setDraft({ executorIds: area.executorIds ?? [], meters: area.meters ?? 0, date: area.date ?? '' }); setExpanded(e => !e) }}
+            className="flex-shrink-0 text-[10px] text-[#9eb8a8] hover:text-[#006734] transition-colors px-1"
+            title="Editar execução"
+          >
+            ✎
+          </button>
+        )}
       </div>
 
-      {/* Equipe — executor select */}
-      <div className="min-w-0">
-        <ExecutorSelect
-          executorIds={area.executorIds ?? []}
-          collaborators={collaborators}
-          onChange={(ids, names) => onUpdate(index, { executorIds: ids, members: names, source: 'MANUAL' })}
-        />
-      </div>
+      {/* Expansão: form de execução */}
+      {expanded && (
+        <div className="mx-3 mb-2 p-3 bg-[#f0faf4] border border-[#c6e8d2] rounded-xl space-y-2.5">
+          <div className="text-[11px] font-bold text-[#006734] uppercase tracking-wide">
+            {area.done ? `Editar execução — ${area.code}` : `Registrar execução — ${area.code}`}
+          </div>
 
-      {/* Metragem */}
-      <div>
-        <input
-          type="number"
-          value={area.meters || ''}
-          onChange={e => onUpdate(index, { meters: parseFloat(e.target.value) || 0, source: 'MANUAL' })}
-          placeholder="—"
-          className="w-full text-[11px] font-semibold text-[#006734] bg-transparent border-b border-transparent hover:border-[#d4e8dc] focus:border-[#006734] focus:outline-none px-1 py-0.5 text-right"
-        />
-      </div>
+          {/* Quem executou */}
+          <div>
+            <div className="text-[10px] font-semibold text-[#3a6347] uppercase tracking-wide mb-1">Quem executou</div>
+            <ExecutorSelect
+              executorIds={draft.executorIds}
+              collaborators={collaborators}
+              onChange={(ids) => setDraft(d => ({ ...d, executorIds: ids }))}
+            />
+          </div>
 
-      {/* Data */}
-      <div>
-        <input
-          type="date"
-          value={toInputDate(area.date)}
-          onChange={e => onUpdate(index, { date: fromInputDate(e.target.value), source: 'MANUAL' })}
-          className="w-full text-[10px] text-[#6b8f74] bg-transparent border-b border-transparent hover:border-[#d4e8dc] focus:border-[#006734] focus:outline-none px-1 py-0.5"
-        />
-      </div>
+          <div className="grid grid-cols-2 gap-2">
+            {/* Metros */}
+            <div>
+              <div className="text-[10px] font-semibold text-[#3a6347] uppercase tracking-wide mb-1">Metros lançados</div>
+              <input
+                type="number"
+                value={draft.meters || ''}
+                onChange={e => setDraft(d => ({ ...d, meters: parseFloat(e.target.value) || 0 }))}
+                placeholder={area.meters > 0 ? String(Math.round(area.meters)) : '—'}
+                className="w-full px-2 py-1.5 text-[12px] font-semibold border border-[#d4e8dc] rounded-lg focus:outline-none focus:border-[#006734] bg-white text-[#0d2517]"
+              />
+            </div>
 
-      {/* CTOs */}
-      <div>
-        <input
-          type="number"
-          value={area.ctoCount ?? ''}
-          onChange={e => onUpdate(index, { ctoCount: parseInt(e.target.value) || undefined })}
-          placeholder="—"
-          className="w-full text-[11px] text-center text-[#6b8f74] bg-transparent border-b border-transparent hover:border-[#d4e8dc] focus:border-[#006734] focus:outline-none px-1 py-0.5"
-        />
-      </div>
+            {/* Data */}
+            <div>
+              <div className="text-[10px] font-semibold text-[#3a6347] uppercase tracking-wide mb-1">Data de execução</div>
+              <input
+                type="date"
+                value={toInputDate(draft.date) || new Date().toISOString().split('T')[0]}
+                onChange={e => setDraft(d => ({ ...d, date: fromInputDate(e.target.value) }))}
+                className="w-full px-2 py-1.5 text-[12px] border border-[#d4e8dc] rounded-lg focus:outline-none focus:border-[#006734] bg-white text-[#0d2517]"
+              />
+            </div>
+          </div>
 
-      {/* CEOs (sempre 1) */}
-      <div className="text-[11px] text-center text-[#6b8f74]">1</div>
-
-      {/* Origem */}
-      <div className="flex items-center justify-end">
-        <SourceBadge source={area.source} />
-      </div>
+          <div className="flex gap-2 pt-0.5">
+            <button
+              type="button"
+              onClick={() => setExpanded(false)}
+              className="flex-1 py-1.5 text-[12px] font-semibold text-[#6b8f74] border border-[#d4e8dc] rounded-lg hover:bg-white transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={confirmExecution}
+              className="flex-1 py-1.5 text-[12px] font-bold bg-[#006734] text-[#FFDE00] rounded-lg hover:bg-[#0a7a3e] transition-colors flex items-center justify-center gap-1"
+            >
+              <CheckCircle2 size={13} /> Confirmar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -647,20 +724,17 @@ export default function ProjectModal({ project: initialProject, onClose, onUpdat
                   {/* Table */}
                   <div className="border border-[#e4eee8] rounded-xl overflow-hidden">
                     {/* Header */}
-                    <div className="grid grid-cols-[28px_64px_1fr_76px_80px_44px_36px_60px] items-center gap-1 px-3 py-2 bg-[#f0faf4] border-b border-[#e4eee8]">
-                      <div />
-                      <div className="text-[9px] font-bold text-[#3a6347] uppercase tracking-wide">Área</div>
-                      <div className="text-[9px] font-bold text-[#3a6347] uppercase tracking-wide flex items-center gap-1">
+                    <div className="flex items-center gap-2 px-3 py-2 bg-[#f0faf4] border-b border-[#e4eee8]">
+                      <div className="w-5 flex-shrink-0" />
+                      <div className="text-[9px] font-bold text-[#3a6347] uppercase tracking-wide w-9 text-center">Área</div>
+                      <div className="text-[9px] font-bold text-[#3a6347] uppercase tracking-wide flex-1 flex items-center gap-1">
                         <Users size={9} /> Equipe
                       </div>
-                      <div className="text-[9px] font-bold text-[#3a6347] uppercase tracking-wide text-right">Metros</div>
                       <div className="text-[9px] font-bold text-[#3a6347] uppercase tracking-wide">Data</div>
-                      <div className="text-[9px] font-bold text-[#3a6347] uppercase tracking-wide text-center">CTOs</div>
-                      <div className="text-[9px] font-bold text-[#3a6347] uppercase tracking-wide text-center">CEO</div>
-                      <div className="text-[9px] font-bold text-[#3a6347] uppercase tracking-wide text-right">Origem</div>
+                      <div className="text-[9px] font-bold text-[#3a6347] uppercase tracking-wide">Metros</div>
                     </div>
 
-                    <div className="max-h-[380px] overflow-y-auto">
+                    <div className="max-h-[420px] overflow-y-auto">
                       {editedAreas.map((area, i) => (
                         <AreaRow
                           key={i}

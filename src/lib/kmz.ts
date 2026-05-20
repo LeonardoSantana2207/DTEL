@@ -159,13 +159,15 @@ export async function parseKMZBuffer(buffer: Buffer): Promise<{
 
 // ─── Busca de KMZ no Drive local ─────────────────────────────────────────────
 
+const NORM = (s: string) =>
+  s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '')
+
 function collectKmzFiles(dir: string, maxDepth: number): string[] {
   if (maxDepth <= 0) return []
   const results: string[] = []
   try {
     const entries = fs.readdirSync(dir)
     for (const entry of entries) {
-      // Pula pastas de documentação, projetos elétricos e financeiros
       if (/^(celpe|neoenergia|neoenerg|ação|acao|orçamento|orcamento|planilha|documento|condominios?|nox|abordagem)/i.test(entry)) continue
       const full = path.join(dir, entry)
       try {
@@ -181,18 +183,94 @@ function collectKmzFiles(dir: string, maxDepth: number): string[] {
   return results
 }
 
-export function findKMZForProject(
-  projectName: string,
-  code?: string | null
-): string | null {
+// ─── Áreas Detalhadas ────────────────────────────────────────────────────────
+
+const SKIP_DIRS = /^(celpe|neoenergia|planilha|documento|condominios?|nox|verificacao|acao|orcamento|arquivos?anteriores?|arquivos?antigos?|antigos?|backup|old|eletrico|engenharia|acesso|permissao)/
+
+// Totalmente assíncrono para não bloquear o event loop no drive de rede
+async function collectAreasDetalhadasDirsAsync(dir: string, maxDepth: number): Promise<string[]> {
+  if (maxDepth <= 0) return []
+  const results: string[] = []
+  try {
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true })
+    const subdirs = entries.filter(e => e.isDirectory())
+    await Promise.all(subdirs.map(async entry => {
+      const n = NORM(entry.name)
+      const full = path.join(dir, entry.name)
+      if (/areadet|areasdet|areasd/.test(n.replace(/\s/g, ''))) {
+        results.push(full)
+      } else if (!SKIP_DIRS.test(n)) {
+        const sub = await collectAreasDetalhadasDirsAsync(full, maxDepth - 1)
+        results.push(...sub)
+      }
+    }))
+  } catch { /* skip */ }
+  return results
+}
+
+function extractCodeFromAreaFilename(filename: string): string | null {
+  const base = path.basename(filename, path.extname(filename))
+  const m = base.match(/[áa]rea\s*\d+\s*[-–\s]+([A-Z]{2,5})\s*$/i)
+  if (m) return m[1].toUpperCase()
+  const bare = base.trim()
+  if (/^[A-Z]{2,5}$/i.test(bare)) return bare.toUpperCase()
+  return null
+}
+
+async function parseOneAreaFile(dir: string, file: string): Promise<{ code: string; meters: number } | null> {
+  const code = extractCodeFromAreaFilename(file)
+  if (!code) return null
+  try {
+    const full = path.join(dir, file)
+    let meters = 0
+    if (file.toLowerCase().endsWith('.kmz')) {
+      const buf = await fs.promises.readFile(full)
+      const { rawTotalMeters } = await parseKMZBuffer(buf)
+      meters = rawTotalMeters
+    } else {
+      const kml = await fs.promises.readFile(full, 'utf8')
+      meters = parseTotalLineStringMeters(kml)
+    }
+    return meters > 0 ? { code, meters } : null
+  } catch { return null }
+}
+
+export async function parseAreasDetalhadasForCity(cityDir: string): Promise<Record<string, number>> {
+  const areas: Record<string, number> = {}
+  const dirs = await collectAreasDetalhadasDirsAsync(cityDir, 4)
+
+  // Lista arquivos de todas as pastas em paralelo (async)
+  const allFiles: { dir: string; file: string }[] = []
+  await Promise.all(dirs.map(async dir => {
+    try {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true })
+      for (const e of entries) {
+        if (!e.isDirectory() && /\.(kmz|kml)$/i.test(e.name)) allFiles.push({ dir, file: e.name })
+      }
+    } catch { /* skip */ }
+  }))
+
+  // Processa em lotes de 15 arquivos para não saturar o drive de rede
+  const BATCH = 15
+  for (let i = 0; i < allFiles.length; i += BATCH) {
+    const batch = allFiles.slice(i, i + BATCH)
+    const results = await Promise.allSettled(batch.map(({ dir, file }) => parseOneAreaFile(dir, file)))
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value) areas[r.value.code] = r.value.meters
+    }
+  }
+
+  return areas
+}
+
+// ─── Localiza pasta da cidade ─────────────────────────────────────────────────
+
+export function findCityDir(cityName: string, code?: string | null): string | null {
   const basePath = process.env.KMZ_BASE_PATH
   if (!basePath || !fs.existsSync(basePath)) return null
 
-  const normalize = (s: string) =>
-    s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '')
-
-  const normName = normalize(projectName.replace(/^rede\s+ftth\s+/i, ''))
-  const normCode = code ? normalize(code) : null
+  const normName = NORM(cityName.replace(/^rede\s+ftth\s+/i, ''))
+  const normCode = code ? NORM(code) : null
 
   let cityDir: string | null = null
   let bestScore = 0
@@ -203,7 +281,7 @@ export function findKMZForProject(
     })
 
     for (const city of cities) {
-      const normCity = normalize(city.replace(/^rede\s+ftth\s+/i, ''))
+      const normCity = NORM(city.replace(/^rede\s+ftth\s+/i, ''))
       if (normCity.length < 3) continue
 
       const nameInCity = normCity.includes(normName) && normName.length >= 3
@@ -220,11 +298,21 @@ export function findKMZForProject(
     }
   } catch { return null }
 
+  return cityDir
+}
+
+export function findKMZForProject(
+  projectName: string,
+  code?: string | null
+): string | null {
+  const cityDir = findCityDir(projectName, code)
   if (!cityDir) return null
 
   // Busca recursiva de arquivos KMZ na pasta da cidade
   const allKmz = collectKmzFiles(cityDir, 4)
   if (!allKmz.length) return null
+
+  const normName = NORM(projectName.replace(/^rede\s+ftth\s+/i, ''))
 
   // Pontua e escolhe o melhor KMZ para representar a rede de cabos da cidade
   const cityDirLower = cityDir.toLowerCase()

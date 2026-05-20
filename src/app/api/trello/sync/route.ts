@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { fetchLists, fetchCards, fetchBoardChecklists } from '@/lib/trello'
-import { findKMZForProject, parseKMZFile } from '@/lib/kmz'
+import { findKMZForProject, parseKMZFile, findCityDir, parseAreasDetalhadasForCity } from '@/lib/kmz'
 import { CHECKLIST_STEPS_CONFIG } from '@/types'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -214,7 +214,7 @@ type KmzCacheEntry = {
   filePath: string
   fileName: string
   ctoCount: number
-  rawTotalMeters: number  // soma bruta de todos os LineStrings
+  rawTotalMeters: number
 }
 
 const kmzCache = new Map<string, KmzCacheEntry>()
@@ -223,18 +223,34 @@ async function loadKMZForCity(cityName: string): Promise<KmzCacheEntry | null> {
   const key = normalizeName(cityName)
   if (kmzCache.has(key)) return kmzCache.get(key)!
 
+  const cityDir = findCityDir(cityName)
   const filePath = findKMZForProject(cityName)
-  if (!filePath) return null
 
-  const result = await parseKMZFile(filePath)
-  if (!result.success) return null
+  // Carrega áreas detalhadas (fonte primária e precisa de metragem por área) com timeout de 45s
+  let areasFromDetalhadas: Record<string, number> = {}
+  if (cityDir) {
+    try {
+      const timeout = new Promise<Record<string, number>>(resolve => setTimeout(() => resolve({}), 20000))
+      areasFromDetalhadas = await Promise.race([parseAreasDetalhadasForCity(cityDir), timeout])
+    } catch { /* skip */ }
+  }
+
+  // Carrega KMZ principal (para CTO count, total metros, fallback de áreas)
+  let mainResult = filePath ? await parseKMZFile(filePath).catch(() => null) : null
+  if (!mainResult?.success) mainResult = null
+
+  // Combina: áreas detalhadas têm prioridade; main KMZ preenche o que faltar
+  const areasFromMain = mainResult?.areas ?? {}
+  const areas: Record<string, number> = { ...areasFromMain, ...areasFromDetalhadas }
+
+  if (!cityDir && !filePath) return null
 
   const entry: KmzCacheEntry = {
-    areas: result.areas ?? {},
-    filePath,
-    fileName: result.fileName ?? path.basename(filePath),
-    ctoCount: result.ctoCount ?? 0,
-    rawTotalMeters: result.rawTotalMeters ?? 0,
+    areas,
+    filePath: filePath ?? '',
+    fileName: filePath ? path.basename(filePath) : cityDir ? path.basename(cityDir) : '',
+    ctoCount: mainResult?.ctoCount ?? 0,
+    rawTotalMeters: mainResult?.rawTotalMeters ?? Object.values(areas).reduce((s, v) => s + v, 0),
   }
   kmzCache.set(key, entry)
   return entry
