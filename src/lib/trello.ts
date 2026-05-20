@@ -100,6 +100,21 @@ export async function fetchCardChecklists(cardId: string) {
   return trelloFetch<TrelloChecklist[]>(`/cards/${cardId}/checklists`)
 }
 
+export async function fetchBoardChecklists(boardId: string): Promise<Map<string, TrelloChecklist[]>> {
+  interface ChecklistWithCard extends TrelloChecklist { idCard: string }
+  const all = await trelloFetch<ChecklistWithCard[]>(
+    `/boards/${boardId}/checklists`,
+    '&fields=name,idCard,checkItems&checkItems=all&checkItem_fields=name,state'
+  )
+  const map = new Map<string, TrelloChecklist[]>()
+  for (const cl of all) {
+    const list = map.get(cl.idCard) ?? []
+    list.push({ id: cl.id, name: cl.name, checkItems: cl.checkItems })
+    map.set(cl.idCard, list)
+  }
+  return map
+}
+
 export async function fetchCardActions(cardId: string) {
   return trelloFetch<TrelloAction[]>(
     `/cards/${cardId}/actions`,

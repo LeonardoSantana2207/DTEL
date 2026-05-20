@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { fetchLists, fetchCards, fetchCardChecklists } from '@/lib/trello'
+import { fetchLists, fetchCards, fetchBoardChecklists } from '@/lib/trello'
 import { findKMZForProject, parseKMZFile } from '@/lib/kmz'
 import { CHECKLIST_STEPS_CONFIG } from '@/types'
 import * as fs from 'fs'
@@ -211,9 +211,38 @@ export async function POST() {
 
   kmzCache.clear()
 
-  // Carrega colaboradores uma única vez — evita N queries por área
+  // Pré-carrega tudo em paralelo antes do loop de cards
   const collabCache = new CollaboratorCache()
-  await collabCache.load()
+
+  const t0 = Date.now()
+  const lists = await fetchLists(boardId)
+  const openLists = lists.filter(l => !l.closed)
+  console.log(`[sync] fetchLists: ${Date.now()-t0}ms, ${openLists.length} listas`)
+
+  const t1 = Date.now()
+  const [, allChecklists, existingProjects, listCards, kmzByCity] = await Promise.all([
+    collabCache.load(),
+    fetchBoardChecklists(boardId),
+    prisma.project.findMany({ select: { id: true, code: true, trelloCardId: true, trelloAreaData: true, status: true, name: true } }),
+    Promise.all(
+      openLists.map(list =>
+        fetchCards(list.id)
+          .then(cards => ({ list, cards }))
+          .catch(() => ({ list, cards: [] as Awaited<ReturnType<typeof fetchCards>> }))
+      )
+    ),
+    // Carrega todos os KMZs em paralelo
+    Promise.all(openLists.map(list => loadKMZForCity(list.name).catch(() => null)))
+      .then(results => {
+        const m = new Map<string, Awaited<ReturnType<typeof loadKMZForCity>>>()
+        openLists.forEach((list, i) => m.set(list.name, results[i]))
+        return m
+      }),
+  ])
+  console.log(`[sync] pré-carga paralela: ${Date.now()-t1}ms, ${allChecklists.size} cards com checklist, ${existingProjects.length} projetos no DB`)
+
+  // Map de projetos existentes para lookup O(1)
+  const projectByCardId = new Map(existingProjects.map(p => [p.trelloCardId, p]))
 
   let cardsProcessed = 0
   let projectsCreated = 0
@@ -221,23 +250,9 @@ export async function POST() {
   const errors: string[] = []
 
   try {
-    const lists = await fetchLists(boardId)
-    const openLists = lists.filter(l => !l.closed)
-
-    for (const list of openLists) {
+    for (const { list, cards } of listCards) {
       const cityName = list.name
-
-      // Carrega KMZ da cidade (uma vez por lista)
-      const kmzInfo = await loadKMZForCity(cityName).catch(() => null)
-
-      // Busca cards da lista
-      let cards: Awaited<ReturnType<typeof fetchCards>>
-      try {
-        cards = await fetchCards(list.id)
-      } catch {
-        errors.push(`Falha ao buscar cards de "${cityName}"`)
-        continue
-      }
+      const kmzInfo = kmzByCity.get(cityName) ?? null
 
       for (const card of cards) {
         if (card.closed) continue
@@ -253,7 +268,7 @@ export async function POST() {
         let cardAreas: Record<string, number> = {}
 
         try {
-          const checklists = await fetchCardChecklists(card.id)
+          const checklists = allChecklists.get(card.id) ?? []
           // Procura checklist "Áreas" (pode ter variações)
           const areasChk = checklists.find(cl =>
             /^[áa]reas?$/i.test(cl.name.trim()) ||
@@ -289,8 +304,8 @@ export async function POST() {
               })
             }
           }
-        } catch {
-          errors.push(`Falha ao buscar checklist do card "${card.name}"`)
+        } catch (e) {
+          errors.push(`Falha ao processar checklist do card "${card.name}": ${e}`)
         }
 
         const areasDone = areasItems.filter(a => a.done).length
@@ -315,33 +330,40 @@ export async function POST() {
         const typeCode = parsed.type === 'LAUNCH' ? 'LANC' : parsed.type === 'FUSION' ? 'FUS' : 'OUT'
         const projectCode = `${cityCode}_${routeCode}_${typeCode}`.replace(/[^A-Z0-9_]/g, '')
 
-        // Cria ou atualiza o projeto
-        const existingByTrello = await prisma.project.findFirst({
-          where: { trelloCardId: card.id },
-        })
+        // Cria ou atualiza o projeto (lookup em memória, sem DB round-trip)
+        const existingByTrello = projectByCardId.get(card.id) ?? null
 
         let projectId: string
 
+        // Computa se houve mudança antes de decidir escrever no banco
+        const newAreaJSON = areaDataForDB.length > 0 ? JSON.stringify(areaDataForDB) : null
+        const areasChanged = newAreaJSON !== (existingByTrello?.trelloAreaData ?? null)
+        const statusChanged = existingByTrello ? status !== existingByTrello.status : false
+        const nameChanged = existingByTrello ? card.name !== existingByTrello.name : false
+        const needsUpdate = !existingByTrello || areasChanged || statusChanged || nameChanged
+
         if (existingByTrello) {
-          await prisma.project.update({
-            where: { id: existingByTrello.id },
-            data: {
-              name: card.name,
-              status,
-              locality: cityName,
-              ...(existingByTrello.code == null && { code: projectCode }),
-              trelloListName: list.name,
-              trelloCardUrl: card.shortUrl,
-              trelloDesc: card.desc,
-              trelloLabels: JSON.stringify(card.labels?.map(l => ({ name: l.name, color: l.color ?? 'black' })) ?? []),
-              ...(cardMeters > 0 && { cableMeters: cardMeters }),
-              ...(Object.keys(cardAreas).length > 0 && { kmzRawAreas: JSON.stringify(cardAreas) }),
-              ...(kmzInfo && { kmzFilePath: kmzInfo.filePath, kmzFileName: kmzInfo.fileName, kmzLastParsed: new Date() }),
-              ...(areaDataForDB.length > 0 && { trelloAreaData: JSON.stringify(areaDataForDB) }),
-            },
-          })
+          if (needsUpdate) {
+            await prisma.project.update({
+              where: { id: existingByTrello.id },
+              data: {
+                name: card.name,
+                status,
+                locality: cityName,
+                ...(existingByTrello.code == null && { code: projectCode }),
+                trelloListName: list.name,
+                trelloCardUrl: card.shortUrl,
+                trelloDesc: card.desc,
+                trelloLabels: JSON.stringify(card.labels?.map(l => ({ name: l.name, color: l.color ?? 'black' })) ?? []),
+                ...(cardMeters > 0 && { cableMeters: cardMeters }),
+                ...(Object.keys(cardAreas).length > 0 && { kmzRawAreas: JSON.stringify(cardAreas) }),
+                ...(kmzInfo && { kmzFilePath: kmzInfo.filePath, kmzFileName: kmzInfo.fileName, kmzLastParsed: new Date() }),
+                ...(newAreaJSON && { trelloAreaData: newAreaJSON }),
+              },
+            })
+            projectsUpdated++
+          }
           projectId = existingByTrello.id
-          projectsUpdated++
         } else {
           const created = await prisma.project.create({
             data: {
@@ -388,8 +410,8 @@ export async function POST() {
           projectsCreated++
         }
 
-        // ── Registra colaboradores lançadores ────────────────────────────────
-        if (parsed.type === 'LAUNCH' && areasItems.length > 0) {
+        // ── Registra colaboradores lançadores (só se áreas mudaram) ─────────
+        if (parsed.type === 'LAUNCH' && areasItems.length > 0 && areasChanged) {
           // Coleta colaboradores e suas áreas (com ou sem KMZ)
           const collabAreas: Record<string, { meters: number; areas: number }> = {}
 
@@ -427,43 +449,54 @@ export async function POST() {
             const totalMeters = Object.values(collabAreas).reduce((s, v) => s + v.meters, 0)
             const totalAreas = Object.values(collabAreas).reduce((s, v) => s + v.areas, 0)
 
+            // Resolve IDs first to deduplicate before inserting
+            const resolvedCollabs: { collabId: string; stats: typeof collabAreas[string] }[] = []
+            const seenIds = new Set<string>()
             for (const [normName, stats] of Object.entries(collabAreas)) {
               const originalName = areasItems
                 .flatMap(a => a.teamMembers)
                 .find(m => normalizeName(m) === normName) ?? normName
-
               const collabId = await collabCache.findOrCreate(originalName)
-              if (!collabId) continue
+              if (!collabId || seenIds.has(collabId)) continue
+              seenIds.add(collabId)
+              resolvedCollabs.push({ collabId, stats })
+            }
 
-              // Percentual baseado em metros (se disponível) ou em áreas
-              const pct = totalMeters > 0
-                ? (stats.meters / totalMeters) * 100
-                : (stats.areas / totalAreas) * 100
-
-              await prisma.projectCollaborator.create({
-                data: {
+            await prisma.projectCollaborator.createMany({
+              data: resolvedCollabs.map(({ collabId, stats }) => {
+                const pct = totalMeters > 0
+                  ? (stats.meters / totalMeters) * 100
+                  : (stats.areas / totalAreas) * 100
+                return {
                   projectId,
                   collaboratorId: collabId,
-                  role: 'LAUNCHER',
+                  role: 'LAUNCHER' as const,
                   metersAssigned: stats.meters > 0 ? stats.meters : null,
                   percentage: pct,
-                },
-              }).catch(() => {/* ignore duplicate */})
-            }
+                }
+              }),
+              skipDuplicates: true,
+            })
           }
         }
 
-        // ── Log de atividade ──────────────────────────────────────────────────
-        await prisma.activityLog.create({
-          data: {
-            projectId,
-            action: `Sincronizado do Trello${kmzInfo ? ` — KMZ: ${kmzInfo.fileName}` : ''}${cardMeters > 0 ? ` — ${Math.round(cardMeters)}m` : ''}`,
-            source: 'TRELLO',
-            details: JSON.stringify({ areas: areasItems.length, done: areasDone }),
-          },
-        })
+        // Log apenas para projetos novos ou mudança de status
+        if (!existingByTrello || statusChanged) {
+          await prisma.activityLog.create({
+            data: {
+              projectId,
+              action: existingByTrello
+                ? `Status alterado para "${status}" via Trello`
+                : `Projeto criado via sync Trello`,
+              source: 'TRELLO',
+              details: JSON.stringify({ areas: areasItems.length, done: areasDone }),
+            },
+          })
+        }
       }
     }
+
+    console.log(`[sync] loop DB: ${Date.now()-t1}ms total, ${cardsProcessed} cards, ${projectsCreated} criados, ${projectsUpdated} atualizados`)
 
     await prisma.trelloSync.create({
       data: {
