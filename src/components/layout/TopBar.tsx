@@ -1,7 +1,7 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
-import { Bell, RefreshCw, Search } from 'lucide-react'
+import { Bell, RefreshCw, Ruler, Search } from 'lucide-react'
 import { useState } from 'react'
 
 const PAGE_TITLES: Record<string, string> = {
@@ -18,6 +18,8 @@ const PAGE_TITLES: Record<string, string> = {
 export default function TopBar() {
   const pathname = usePathname()
   const [syncing, setSyncing] = useState(false)
+  const [syncingMetros, setSyncingMetros] = useState(false)
+  const [metrosSynced, setMetrosSynced] = useState<{ areas: number; projects: number } | null>(null)
   const [search, setSearch] = useState('')
 
   const title = Object.entries(PAGE_TITLES).find(([p]) => pathname.startsWith(p))?.[1] ?? ''
@@ -28,6 +30,18 @@ export default function TopBar() {
       await fetch('/api/trello/sync', { method: 'POST' })
     } finally {
       setSyncing(false)
+    }
+  }
+
+  async function handleSyncMetros() {
+    setSyncingMetros(true)
+    setMetrosSynced(null)
+    try {
+      const res = await fetch('/api/kmz/sync-areas', { method: 'POST' })
+      const data = await res.json()
+      if (data.ok) setMetrosSynced({ areas: data.areasUpdated ?? 0, projects: data.projectsUpdated ?? 0 })
+    } finally {
+      setSyncingMetros(false)
     }
   }
 
@@ -62,6 +76,26 @@ export default function TopBar() {
           "
         />
       </div>
+
+      {/* Sync Metros button */}
+      <button
+        onClick={handleSyncMetros}
+        disabled={syncingMetros}
+        title="Sincroniza metragens das Áreas Detalhadas (requer KMZ local)"
+        className="
+          flex items-center gap-2 px-3.5 py-2 rounded-lg text-[12px] font-semibold
+          bg-white hover:bg-[#f0faf4] text-[#006734]
+          transition-colors disabled:opacity-60
+          border border-[#006734]
+        "
+      >
+        <Ruler size={13} className={syncingMetros ? 'animate-pulse' : ''} />
+        {syncingMetros
+          ? 'Sincronizando...'
+          : metrosSynced
+            ? `${metrosSynced.areas} áreas`
+            : 'Sync Metros'}
+      </button>
 
       {/* Sync Trello button */}
       <button
