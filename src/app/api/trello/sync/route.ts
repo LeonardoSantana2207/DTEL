@@ -120,44 +120,52 @@ function splitTeam(teamRaw: string): string[] {
     .filter(s => s.length >= 2)
 }
 
-// ─── Busca ou cria colaborador no banco ───────────────────────────────────────
+// ─── Cache de colaboradores (carregado uma vez por sync) ─────────────────────
 
 const COLORS = ['#006734', '#0a7a3e', '#1a9e52', '#FEBF11', '#3B82F6', '#8B5CF6', '#F97316', '#EF4444']
-let colorIdx = 0
 
-async function findOrCreateCollaborator(name: string): Promise<string | null> {
-  if (!name || name.length < 2) return null
+class CollaboratorCache {
+  private map = new Map<string, string>()  // norm name → id
+  private colorIdx = 0
 
-  // Busca todos e faz comparação normalizada
-  const all = await prisma.collaborator.findMany()
-  const normInput = normalizeName(name)
+  async load() {
+    const all = await prisma.collaborator.findMany()
+    for (const c of all) {
+      this.map.set(normalizeName(c.name), c.id)
+      if (c.nickname) this.map.set(normalizeName(c.nickname), c.id)
+    }
+  }
 
-  // Tenta match exato
-  const exact = all.find(c => normalizeName(c.name) === normInput)
-  if (exact) return exact.id
+  find(name: string): string | null {
+    if (!name || name.length < 2) return null
+    const normInput = normalizeName(name)
 
-  // Tenta match parcial (primeiro nome ou sobrenome)
-  const partial = all.find(c => {
-    const normDb = normalizeName(c.name)
-    return normDb.includes(normInput) || normInput.includes(normDb) ||
-      normalizeName(c.nickname ?? '') === normInput
-  })
-  if (partial) return partial.id
+    // Exact match
+    if (this.map.has(normInput)) return this.map.get(normInput)!
 
-  // Cria novo colaborador
-  const initials = name.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase()
-  const color = COLORS[colorIdx % COLORS.length]
-  colorIdx++
+    // Partial match (first name or contained)
+    const entries = Array.from(this.map.entries())
+    for (const [normDb, id] of entries) {
+      if (normDb.includes(normInput) || normInput.includes(normDb)) return id
+    }
+    return null
+  }
 
-  const created = await prisma.collaborator.create({
-    data: {
-      name,
-      initials,
-      avatarColor: color,
-      active: true,
-    },
-  })
-  return created.id
+  async findOrCreate(name: string): Promise<string | null> {
+    if (!name || name.length < 2) return null
+    const existing = this.find(name)
+    if (existing) return existing
+
+    // Create new collaborator
+    const initials = name.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase()
+    const color = COLORS[this.colorIdx % COLORS.length]
+    this.colorIdx++
+    const created = await prisma.collaborator.create({
+      data: { name, initials, avatarColor: color, active: true },
+    })
+    this.map.set(normalizeName(name), created.id)
+    return created.id
+  }
 }
 
 // ─── KMZ cache por cidade ─────────────────────────────────────────────────────
@@ -202,6 +210,10 @@ export async function POST() {
   }
 
   kmzCache.clear()
+
+  // Carrega colaboradores uma única vez — evita N queries por área
+  const collabCache = new CollaboratorCache()
+  await collabCache.load()
 
   let cardsProcessed = 0
   let projectsCreated = 0
@@ -262,7 +274,7 @@ export async function POST() {
               const teamMembers = splitTeam(p.team)
               const executorIds: string[] = []
               for (const member of teamMembers) {
-                const id = await findOrCreateCollaborator(member)
+                const id = collabCache.find(member)
                 if (id) executorIds.push(id)
               }
 
@@ -420,7 +432,7 @@ export async function POST() {
                 .flatMap(a => a.teamMembers)
                 .find(m => normalizeName(m) === normName) ?? normName
 
-              const collabId = await findOrCreateCollaborator(originalName)
+              const collabId = await collabCache.findOrCreate(originalName)
               if (!collabId) continue
 
               // Percentual baseado em metros (se disponível) ou em áreas
