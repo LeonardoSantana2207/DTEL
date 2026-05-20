@@ -51,9 +51,18 @@ function extractFolderBlock(kml: string, startPos: number): string | null {
   return kml.slice(startPos, pos)
 }
 
+// Extrai código de área de nomes de pasta KMZ:
+// "AAA", "ABK" → direto
+// "Área 1 - AAA", "Área 1 - AAA*" → extrai o código
+function extractAreaCode(folderName: string): string | null {
+  const name = folderName.trim()
+  if (/^[A-Z]{2,4}$/.test(name)) return name
+  const m = name.match(/[áa]rea\s+\d+\s*[-–]\s*([A-Z]{2,4})\*?/i)
+  return m ? m[1] : null
+}
+
 function parseKMLAreas(kml: string): Record<string, number> {
   const areas: Record<string, number> = {}
-  const areaRe = /^[A-Z]{2,3}$/
   let pos = 0
 
   while (pos < kml.length) {
@@ -70,8 +79,9 @@ function parseKMLAreas(kml: string): Record<string, number> {
     }
 
     const name = kml.slice(nStart + 6, nEnd).trim()
+    const code = extractAreaCode(name)
 
-    if (areaRe.test(name)) {
+    if (code) {
       const block = extractFolderBlock(kml, fStart)
       if (!block) { pos = fStart + 8; continue }
 
@@ -82,7 +92,7 @@ function parseKMLAreas(kml: string): Record<string, number> {
         const pts = m[1].trim().split(/\s+/).filter(p => p.includes(','))
         if (pts.length > 1) total += lineStringLength(m[1])
       }
-      if (total > 0) areas[name] = (areas[name] ?? 0) + total
+      if (total > 0) areas[code] = (areas[code] ?? 0) + total
       pos = fStart + block.length
     } else {
       pos = fStart + 8

@@ -84,15 +84,54 @@ function deriveStatus(
 }
 
 // ─── Parse do item de checklist ───────────────────────────────────────────────
-// Formato: "AAA - EQUIPE: Daniel Antonio - DATA DE EXECUÇÃO: 03/09/2024"
-// Variações: "AAB- EQUIPE:...", "AAK- EQUIPE: X + Y - DATA..."
-
-const AREA_ITEM_RE = /^([A-Z]{2,4})\s*[-–]\s*EQUIPE:\s*(.+?)\s*[-–]\s*DATA.*?:\s*(\d{2}\/\d{2}\/\d{4})/i
+// Formatos encontrados no board:
+// "AAA - EQUIPE: Daniel - DATA DE EXECUÇÃO: 03/09/2024"
+// "AAA - - EQUIPE: Daniel - DATA DE EXECUÇÃO: ..."   (duplo traço)
+// "AAA: SPLITTER: Daniel - DATA DE EXECUÇÃO: ..."     (colon + SPLITTER)
+// "AAA - SPLITTER - EQUIPE: Daniel - DATA: ..."       (SPLITTER como tipo)
+// "CEO-10: - EQUIPE: Diego - DATA DE EXECUÇÃO: ..."   (código com traço+número)
+// "¹CEO-06: EQUIPE: Diego - DATA DE EXECUÇÃO: ..."    (prefixo superscript)
+// "DIO 144 EQUIPE: Diego // DATA DE EXECUÇÃO: ..."    (sem traço, "//" separador)
+// "AAA - EQUIPE: Diego - DATA DE EXECUÇÃO: 06/12/21"  (ano com 2 dígitos)
 
 function parseCheckItem(text: string): { code: string; team: string; date: string } | null {
-  const m = text.match(AREA_ITEM_RE)
-  if (!m) return null
-  return { code: m[1].toUpperCase(), team: m[2].trim(), date: m[3] }
+  // Remove prefixos especiais: superscripts, espaços
+  const clean = text.replace(/^[¹²³⁴⁵⁶⁷⁸⁹\s]+/, '').trim()
+
+  // Extrai código: 2-5 letras maiúsculas, opcionalmente seguidas de -número ou espaço+número
+  const codeMatch = clean.match(/^([A-Z]{2,5}(?:[-\s]\d+)?)\s*[-:–\s]/i)
+  if (!codeMatch) return null
+  const code = codeMatch[1].toUpperCase().replace(/\s+/g, '-')
+
+  // Extrai data (dd/mm/yyyy ou dd/mm/yy)
+  const dateMatch = clean.match(/DATA[^:]*:\s*(\d{2}\/\d{2}\/(\d{2}|\d{4}))\b/i)
+  if (!dateMatch) return null
+  const rawDate = dateMatch[1]
+  // Normaliza ano de 2 dígitos: 21 → 2021
+  const date = rawDate.length === 8 ? rawDate.slice(0, 6) + '20' + rawDate.slice(6) : rawDate
+
+  // Extrai equipe: o que fica entre o separador do código e o início do DATA
+  const afterCode = clean.slice(codeMatch[0].length)
+  const dataPos = afterCode.search(/DATA[^:]*:/i)
+  if (dataPos === -1) return null
+
+  let teamRaw = afterCode.slice(0, dataPos).trim()
+  // Remove sufixo a partir de //
+  teamRaw = teamRaw.replace(/\s*\/\/.*$/, '').trim()
+  // Remove separadores e keywords em loop (ex: "SPLITTER - EQUIPE: ...")
+  for (let i = 0; i < 4; i++) {
+    const before = teamRaw
+    teamRaw = teamRaw
+      .replace(/^[-–\s]+/, '')
+      .replace(/^(?:EQUIPE|SPLITTER|FUSÃO|FUSAO)\s*[-–:,]?\s*/i, '')
+      .trim()
+    if (teamRaw === before) break
+  }
+  // Remove trailing separators
+  teamRaw = teamRaw.replace(/\s*[-–]+\s*$/, '').trim()
+
+  if (!teamRaw || teamRaw.length < 2) return null
+  return { code, team: teamRaw, date }
 }
 
 // ─── Normalização de nomes de colaboradores ───────────────────────────────────
