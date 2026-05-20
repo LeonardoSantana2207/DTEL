@@ -268,7 +268,7 @@ function AreaRow({ area, index, collaborators, onUpdate }: AreaRowProps) {
           <div>
             <div className="text-[10px] font-semibold text-[#3a6347] uppercase tracking-wide mb-1.5">Quem executou</div>
             <div className="space-y-1">
-              {collaborators.filter(c => c.active !== false).map(c => {
+              {collaborators.filter(c => c.active !== false && /[a-zA-ZÀ-ÿ]{3,}/.test(c.name)).map(c => {
                 const selected = draft.executorIds.includes(c.id)
                 return (
                   <button
