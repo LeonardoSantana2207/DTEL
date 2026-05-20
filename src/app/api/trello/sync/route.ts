@@ -301,6 +301,16 @@ export async function POST() {
         const parsed = parseCardName(card.name, cityName)
         parsed.isFinished = isFinished
 
+        // Lookup antecipado para preservar metros existentes quando KMZ não está disponível
+        const existingByTrelloEarly = projectByCardId.get(card.id) ?? null
+        let existingMeters: Record<string, number> = {}
+        if (!kmzInfo && existingByTrelloEarly?.trelloAreaData) {
+          try {
+            const prev = JSON.parse(existingByTrelloEarly.trelloAreaData) as AreaForDB[]
+            for (const a of prev) { if (a.meters > 0) existingMeters[a.code] = a.meters }
+          } catch { /* ignore */ }
+        }
+
         // Busca checklists
         let areasItems: ParsedArea[] = []
         let cardMeters = 0
@@ -319,7 +329,7 @@ export async function POST() {
               const p = parseCheckItem(item.name)
               if (!p) continue
 
-              const areaMeters = kmzInfo?.areas[p.code] ?? 0
+              const areaMeters = kmzInfo?.areas[p.code] ?? existingMeters[p.code] ?? 0
               if (areaMeters > 0) {
                 cardAreas[p.code] = areaMeters
                 cardMeters += areaMeters
@@ -369,8 +379,7 @@ export async function POST() {
         const typeCode = parsed.type === 'LAUNCH' ? 'LANC' : parsed.type === 'FUSION' ? 'FUS' : 'OUT'
         const projectCode = `${cityCode}_${routeCode}_${typeCode}`.replace(/[^A-Z0-9_]/g, '')
 
-        // Cria ou atualiza o projeto (lookup em memória, sem DB round-trip)
-        const existingByTrello = projectByCardId.get(card.id) ?? null
+        const existingByTrello = existingByTrelloEarly
 
         let projectId: string
 
