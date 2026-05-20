@@ -6,6 +6,8 @@ import { CHECKLIST_STEPS_CONFIG } from '@/types'
 import * as fs from 'fs'
 import * as path from 'path'
 
+export const maxDuration = 60
+
 // ─── Tipos internos do sync ───────────────────────────────────────────────────
 
 interface ParsedArea {
