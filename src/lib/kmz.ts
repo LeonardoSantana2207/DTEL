@@ -217,29 +217,39 @@ function extractCodeFromAreaFilename(filename: string): string | null {
   return null
 }
 
-async function parseOneAreaFile(dir: string, file: string): Promise<{ code: string; meters: number } | null> {
+async function parseOneAreaFile(dir: string, file: string): Promise<{ code: string; meters: number; ctos: number } | null> {
   const code = extractCodeFromAreaFilename(file)
   if (!code) return null
   try {
     const full = path.join(dir, file)
     let meters = 0
+    let ctos = 0
     if (file.toLowerCase().endsWith('.kmz')) {
       const buf = await fs.promises.readFile(full)
-      const { rawTotalMeters } = await parseKMZBuffer(buf)
+      const { rawTotalMeters, ctoCount } = await parseKMZBuffer(buf)
       meters = rawTotalMeters
+      ctos = ctoCount
     } else {
       const kml = await fs.promises.readFile(full, 'utf8')
       meters = parseTotalLineStringMeters(kml)
+      ctos = countCTOs(kml)
     }
-    return meters > 0 ? { code, meters } : null
+    if (meters <= 0 && ctos <= 0) return null
+    return { code, meters, ctos }
   } catch { return null }
 }
 
-export async function parseAreasDetalhadasForCity(cityDir: string): Promise<Record<string, number>> {
+export interface AreasDetalhadasResult {
+  areas: Record<string, number>   // código → metros
+  ctos: Record<string, number>    // código → quantidade de CTOs
+  areasDirPath: string | null     // caminho da pasta Áreas Detalhadas
+}
+
+export async function parseAreasDetalhadasForCity(cityDir: string): Promise<AreasDetalhadasResult> {
   const areas: Record<string, number> = {}
+  const ctos: Record<string, number> = {}
   const dirs = await collectAreasDetalhadasDirsAsync(cityDir, 4)
 
-  // Lista arquivos de todas as pastas em paralelo (async)
   const allFiles: { dir: string; file: string }[] = []
   await Promise.all(dirs.map(async dir => {
     try {
@@ -250,17 +260,19 @@ export async function parseAreasDetalhadasForCity(cityDir: string): Promise<Reco
     } catch { /* skip */ }
   }))
 
-  // Processa em lotes de 15 arquivos para não saturar o drive de rede
   const BATCH = 15
   for (let i = 0; i < allFiles.length; i += BATCH) {
     const batch = allFiles.slice(i, i + BATCH)
     const results = await Promise.allSettled(batch.map(({ dir, file }) => parseOneAreaFile(dir, file)))
     for (const r of results) {
-      if (r.status === 'fulfilled' && r.value) areas[r.value.code] = r.value.meters
+      if (r.status === 'fulfilled' && r.value) {
+        areas[r.value.code] = r.value.meters
+        if (r.value.ctos > 0) ctos[r.value.code] = r.value.ctos
+      }
     }
   }
 
-  return areas
+  return { areas, ctos, areasDirPath: dirs[0] ?? null }
 }
 
 // ─── Localiza pasta da cidade ─────────────────────────────────────────────────
